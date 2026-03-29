@@ -361,3 +361,26 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# ===============================================
+# GeoResearchVis (GeoVis) - 数据与本地数据库忽略
+# ===============================================
+
+# 忽略本地极速数据库文件及其预写日志
+*.duckdb
+*.duckdb.wal
+
+# 忽略海量数据源文件
+*.csv
+*.tsv
+*.parquet
+*.json
+*.geojson
+
+# 忽略本地缓存或导出的大体积图表
+*.png
+*.pdf
+*.svg
+
+# （可选）你可以取消注释下面这行，专门保留 Data 目录下的一个小体积示例文件用于测试
+# !Data/sample_mini.csv
