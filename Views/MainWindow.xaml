@@ -5,6 +5,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:GeoVis.ViewModels"
+        xmlns:ScottPlot="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="{Binding ApplicationTitle}" Height="768" Width="1024"
         WindowStartupLocation="CenterScreen"
@@ -40,6 +42,40 @@
                             Margin="0,8" 
                             Command="{Binding ImportCsvCommand}"
                             Style="{StaticResource AcademicButtonStyle}"/>
+
+                    <Button Content="2. 加载网格(GeoJSON)并渲染" 
+                            Margin="0,8" 
+                            Command="{Binding LoadAndRenderMapCommand}"
+                            Style="{StaticResource AcademicButtonStyle}"/>
+
+                    <!-- 新增时间切片控制台 -->
+                    <Border Background="#F5F7FA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,15,0,0">
+                        <StackPanel>
+                            <TextBlock Text="空间时间切片控制" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,10"/>
+
+                            <!-- 日期选择下拉框 -->
+                            <TextBlock Text="选择日期:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                            <ComboBox ItemsSource="{Binding AvailableDates}" 
+                                      SelectedItem="{Binding SelectedDate}" 
+                                      Margin="0,0,0,15"
+                                      Background="White" Padding="5"/>
+
+                            <!-- 小时滑块 -->
+                            <TextBlock Text="{Binding SelectedHour, StringFormat='选择小时: {0:D2}:00'}" Foreground="#546E7A" Margin="0,0,0,5"/>
+                            <Slider Minimum="0" Maximum="23" 
+                                    Value="{Binding SelectedHour}" 
+                                    TickFrequency="1" IsSnapToTickEnabled="True"
+                                    Margin="0,0,0,5"/>
+
+                            <!-- 刻度线说明 -->
+                            <Grid>
+                                <TextBlock Text="0" HorizontalAlignment="Left" FontSize="10" Foreground="Gray"/>
+                                <TextBlock Text="12" HorizontalAlignment="Center" FontSize="10" Foreground="Gray"/>
+                                <TextBlock Text="23" HorizontalAlignment="Right" FontSize="10" Foreground="Gray"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    
                 </StackPanel>
 
                 <!-- 状态栏 -->
@@ -47,15 +83,18 @@
             </Grid>
         </Border>
 
-        <!-- 右侧可视化区域：绑定 QueryResultText -->
-        <Grid Grid.Column="1" Background="#F8F9FA">
-            <TextBlock Text="{Binding QueryResultText}" 
-                       HorizontalAlignment="Center" 
-                       VerticalAlignment="Center" 
-                       Foreground="#546E7A" 
-                       FontSize="16"
-                       TextWrapping="Wrap"
-                       Margin="40"/>
-        </Grid>
+        <!-- 右侧可视化区域：分为两个选项卡 -->
+        <TabControl Grid.Column="1" Background="#FFFFFF" BorderThickness="0" Margin="10" Padding="0">
+            <!-- Tab 1: ScottPlot 时序图 -->
+            <TabItem Header="📈 网络时序统计" FontSize="14">
+                <ScottPlot:WpfPlot x:Name="MainChart" />
+            </TabItem>
+
+            <!-- Tab 2: WebView2 空间地图 -->
+            <TabItem Header="🗺️ 空间底图呈现" FontSize="14">
+                <!-- 这里的 CreationProperties 可用于配置数据文件夹路径等高级功能 -->
+                <wv2:WebView2 x:Name="MapWebView" />
+            </TabItem>
+        </TabControl>
     </Grid>
 </Window>
