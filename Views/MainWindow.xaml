@@ -36,9 +36,9 @@
 
                 <!-- 预留的导入按钮 -->
                 <StackPanel Grid.Row="1">
-                    <Button Content="导入空间数据 (DuckDB)" 
+                    <Button Content="导入 OD 数据 (CSV)" 
                             Margin="0,8" 
-                            IsEnabled="False" 
+                            Command="{Binding ImportCsvCommand}"
                             Style="{StaticResource AcademicButtonStyle}"/>
                 </StackPanel>
 
@@ -47,13 +47,15 @@
             </Grid>
         </Border>
 
-        <!-- 右侧可视化区域 -->
+        <!-- 右侧可视化区域：绑定 QueryResultText -->
         <Grid Grid.Column="1" Background="#F8F9FA">
-            <TextBlock Text="图表与地图渲染区 (等待加载...)" 
+            <TextBlock Text="{Binding QueryResultText}" 
                        HorizontalAlignment="Center" 
                        VerticalAlignment="Center" 
-                       Foreground="#B0BEC5" 
-                       FontSize="24"/>
+                       Foreground="#546E7A" 
+                       FontSize="16"
+                       TextWrapping="Wrap"
+                       Margin="40"/>
         </Grid>
     </Grid>
 </Window>
