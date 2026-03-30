@@ -36,14 +36,19 @@
 
         // 2. 颜色阈值函数
         function getColor(d) {
-            return d > 50000 ? '#800026' :
-                d > 20000 ? '#BD0026' :
-                    d > 10000 ? '#E31A1C' :
-                        d > 5000 ? '#FC4E2A' :
-                            d > 2000 ? '#FD8D3C' :
-                                d > 500 ? '#FEB24C' :
-                                    d > 100 ? '#FED976' :
-                                        '#FFEDA0';
+            return d > 20000 ? '#800026' : d > 10000 ? '#BD0026' : d > 5000 ? '#E31A1C' :
+                d > 2000 ? '#FC4E2A' : d > 500 ? '#FD8D3C' : d > 100 ? '#FEB24C' : '#FFEDA0';
+        }
+
+        // 【新增】：做差分析专属的冷暖双色 (红增蓝减)
+        function getDiffColor(d) {
+            if (d > 500) return '#b2182b';  // 深红 (激增)
+            if (d > 100) return '#ef8a62';  // 浅红
+            if (d > 10) return '#fddbc7';  // 微红
+            if (d < -500) return '#2166ac'; // 深蓝 (骤降)
+            if (d < -100) return '#67a9cf'; // 浅蓝
+            if (d < -10) return '#d1e5f0'; // 微蓝
+            return 'transparent';
         }
 
         var geoJsonLayer;
@@ -51,44 +56,44 @@
         // 3. 渲染 GeoJSON 的核心函数
         function renderGeoData(geoData) {
             try {
-                if (geoJsonLayer) {
-                    map.removeLayer(geoJsonLayer);
-                }
-
-                // 兼容性处理：如果 C# 传过来的是 JSON 字符串，则解析；如果是对象，则直接用
+                if (geoJsonLayer) map.removeLayer(geoJsonLayer);
                 var dataObj = typeof geoData === 'string' ? JSON.parse(geoData) : geoData;
+                var mode = dataObj.map_mode; // 获取 C# 传来的模式
 
                 geoJsonLayer = L.geoJSON(dataObj, {
                     style: function (feature) {
-                        // 【关键】：这里绑定的是 outflow 流出量来渲染颜色
-                        var val = feature.properties.outflow || 0;
-                        return {
-                            fillColor: val > 0 ? getColor(val) : "transparent",
-                            weight: 0.5,
-                            opacity: 1,
-                            color: '#9A9A9A',
-                            fillOpacity: 0.7
-                        };
+                        var v1 = feature.properties.val1 || 0;
+                        var v2 = feature.properties.val2 || 0;
+                        var fillCol = "transparent";
+
+                        // 根据模式决定染色逻辑
+                        if (mode === '驻留人口与变化 (做差)') {
+                            fillCol = getDiffColor(v2); // 做差模式用 val2(环比变化量) 渲染冷暖色
+                        } else {
+                            fillCol = v1 > 0 ? getColor(v1) : "transparent"; // 其他模式用 val1 渲染热力图
+                        }
+
+                        return { fillColor: fillCol, weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: 0.8 };
                     },
                     onEachFeature: function (feature, layer) {
-                        var outV = feature.properties.outflow || 0;
-                        var inV = feature.properties.inflow || 0;
+                        var v1 = feature.properties.val1 || 0;
+                        var v2 = feature.properties.val2 || 0;
                         var cid = feature.properties.cid || "未知";
+                        var tooltipHtml = `<div style="font-family: Arial; font-size: 13px;"><b>网格 ID:</b> ${cid}<br/>`;
 
-                        var tooltipHtml = `
-                                <div style="font-family: Arial; font-size: 13px;">
-                                    <b>网格 ID:</b> ${cid}<br/>
-                                    <span style="color: #E31A1C;">● 流出量: ${outV}</span><br/>
-                                    <span style="color: #1F78B4;">● 流入量: ${inV}</span>
-                                </div>
-                            `;
+                        if (mode === 'OD 流出与流入') {
+                            tooltipHtml += `<span style="color: #E31A1C;">● 流出: ${v1}</span><br/><span style="color: #1F78B4;">● 流入: ${v2}</span>`;
+                        } else if (mode === '驻留人口与变化 (做差)') {
+                            var changeStr = v2 > 0 ? `<span style="color:#b2182b;">↑ 增加 ${v2}</span>` : `<span style="color:#2166ac;">↓ 减少 ${Math.abs(v2)}</span>`;
+                            tooltipHtml += `● 当前驻留: ${v1}<br/>● 环比变化: ${changeStr}`;
+                        } else {
+                            tooltipHtml += `● 常住人口: ${v1}<br/>● 联通推算: ${v2}`;
+                        }
+                        tooltipHtml += `</div>`;
                         layer.bindTooltip(tooltipHtml);
                     }
                 }).addTo(map);
-
-            } catch (error) {
-                console.error("渲染地图时出错:", error);
-            }
+            } catch (e) { console.error(e); }
         }
 
         // 4. 监听 C# 发来的消息

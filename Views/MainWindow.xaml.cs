@@ -65,74 +65,139 @@ namespace GeoVis.Views
 
         private void ViewModel_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
-            // 当接收到后端传来的数据时
             if (e.PropertyName == nameof(MainViewModel.NetworkMetricsData))
             {
                 var vm = (MainViewModel)sender;
-                if (vm.NetworkMetricsData != null && vm.NetworkMetricsData.Any())
-                {
-                    RenderAcademicChart(vm.NetworkMetricsData);
-                }
+                RenderAcademicChart(vm);
             }
         }
 
-        private void RenderAcademicChart(System.Collections.Generic.List<Models.HourlyNetworkMetric> data)
+        private void RenderAcademicChart(MainViewModel vm)
         {
-            MainChart.Plot.Clear();
+            MainChart.Reset(); // 彻底清理旧画布
 
-            // 1. 数据准备：将你 Python 的日期转成 ScottPlot 识别的数值
-            double[] xs = new double[data.Count];
-            double[] y_weight = new double[data.Count];
-            double[] y_edge = new double[data.Count];
+            bool isOdMode = vm.SelectedChartMode == "OD 轨迹流量";
 
-            for (int i = 0; i < data.Count; i++)
+            // --- 1. 准备主线数据 ---
+            int dataCount = isOdMode ? (vm.NetworkMetricsData?.Count ?? 0) : (vm.MobilityMetricsData?.Count ?? 0);
+            if (dataCount == 0) return;
+
+            double[] xs = new double[dataCount];
+            double[] y_primary = new double[dataCount];
+            double[] y_secondary = new double[dataCount];
+
+            for (int i = 0; i < dataCount; i++)
             {
-                var d = data[i];
-                // 拼接 "20230501" 和 "0" 变成具体的时间对象
-                DateTime dt = DateTime.ParseExact($"{d.StartDate}{d.StartHour:D2}", "yyyyMMddHH", System.Globalization.CultureInfo.InvariantCulture);
-                xs[i] = dt.ToOADate(); // C# 处理时间序列的常规做法
-                y_weight[i] = d.TotalWeight;
-                y_edge[i] = d.EdgeNumber;
+                if (isOdMode)
+                {
+                    var d = vm.NetworkMetricsData[i];
+                    DateTime dt = DateTime.ParseExact($"{d.StartDate}{d.StartHour:D2}", "yyyyMMddHH", System.Globalization.CultureInfo.InvariantCulture);
+                    xs[i] = dt.ToOADate();
+                    y_primary[i] = d.TotalWeight;
+                    y_secondary[i] = d.EdgeNumber;
+                }
+                else
+                {
+                    var m = vm.MobilityMetricsData[i];
+                    // 处理 date 字符串 (如 "2023-05-01") + hour
+                    DateTime dt = Convert.ToDateTime(m.DateStr).AddHours(m.Hour);
+                    xs[i] = dt.ToOADate();
+                    y_primary[i] = m.TotalSignal;
+                }
             }
 
-            // 2. 绘制左轴 (总流量) - 复刻 Python 配色 #C06C84
-            var sigWeight = MainChart.Plot.Add.Scatter(xs, y_weight);
-            sigWeight.Color = Color.FromHex("#C06C84");
-            sigWeight.LineWidth = 2.5f;
-            sigWeight.MarkerSize = 4;
-            sigWeight.Label = "Total Edge Weight";
+            // --- 2. 绘制主线 (左轴) ---
+            var sigPrimary = MainChart.Plot.Add.ScatterLine(xs, y_primary);
+            sigPrimary.Color = Color.FromHex("#C06C84");
+            sigPrimary.LineWidth = 2.5f;
+            sigPrimary.Label = isOdMode ? "Total Flow (OD)" : "Total Signal (Mobility)";
 
-            // 左侧 Y 轴样式
-            MainChart.Plot.Axes.Left.Label.Text = "Total Edge Weight";
-            MainChart.Plot.Axes.Left.Label.ForeColor = sigWeight.Color;
-            MainChart.Plot.Axes.Left.TickLabelStyle.ForeColor = sigWeight.Color;
+            MainChart.Plot.Axes.Left.Label.Text = sigPrimary.Label;
+            MainChart.Plot.Axes.Left.Label.ForeColor = sigPrimary.Color;
+            MainChart.Plot.Axes.SetLimitsY(0, y_primary.Max() * 1.5, MainChart.Plot.Axes.Left);
 
-            // 3. 绘制右轴 (边数量) - 复刻 Python 配色 #5890AD
-            var sigEdge = MainChart.Plot.Add.Scatter(xs, y_edge);
-            sigEdge.Color = Color.FromHex("#5890AD");
-            sigEdge.LineWidth = 2.5f;
-            sigEdge.MarkerSize = 4;
-            sigEdge.Label = "Edge Number";
+            // --- 3. 绘制副线 (右轴，仅 OD 模式有) ---
+            if (isOdMode)
+            {
+                var sigSec = MainChart.Plot.Add.ScatterLine(xs, y_secondary);
+                sigSec.Color = Color.FromHex("#5890AD");
+                sigSec.LineWidth = 2.5f;
+                sigSec.Label = "Edge Count";
+                sigSec.Axes.YAxis = MainChart.Plot.Axes.Right;
 
-            // 绑定到右侧 Y 轴
-            sigEdge.Axes.YAxis = MainChart.Plot.Axes.Right;
-            MainChart.Plot.Axes.Right.Label.Text = "Edge Number";
-            MainChart.Plot.Axes.Right.Label.ForeColor = sigEdge.Color;
-            MainChart.Plot.Axes.Right.TickLabelStyle.ForeColor = sigEdge.Color;
+                MainChart.Plot.Axes.Right.Label.Text = "Edge Count";
+                MainChart.Plot.Axes.Right.Label.ForeColor = sigSec.Color;
+                MainChart.Plot.Axes.SetLimitsY(0, y_secondary.Max() * 1.5, MainChart.Plot.Axes.Right);
+            }
+            else
+            {
+                MainChart.Plot.Axes.Right.IsVisible = false; // 驻留模式隐藏右轴
+            }
 
-            // 4. X轴样式设置：将其转化为日期时间显示
+            // --- 4. 完美倒挂降水柱状图 (负值映射法) ---
+            if (vm.RainfallMultiData != null && vm.RainfallMultiData.Any())
+            {
+                var yAxisRain = MainChart.Plot.Axes.AddLeftAxis();
+                yAxisRain.Label.Text = "Rainfall (mm)";
+                yAxisRain.Label.ForeColor = Color.FromHex("#4FC1E9");
+
+                // 巧妙：格式化刻度线，把负数显示为正数，完美欺骗视觉！
+                yAxisRain.TickGenerator = new ScottPlot.TickGenerators.NumericAutomatic()
+                {
+                    LabelFormatter = val => Math.Abs(val).ToString("0")
+                };
+
+                double globalMaxRain = 1;
+
+                // 准备一组带高透明度的好看颜色
+                string[] palette = { "#4A4FC1E9", "#4AED5565", "#4AA0D468", "#4AFFCE54", "#4AAC92EC" };
+                int colorIdx = 0;
+
+                foreach (var kvp in vm.RainfallMultiData)
+                {
+                    string stationName = kvp.Key;
+                    var rainDict = kvp.Value;
+                    double[] y_rain = new double[dataCount];
+
+                    for (int i = 0; i < dataCount; i++)
+                    {
+                        DateTime currentDt = DateTime.FromOADate(xs[i]);
+                        if (rainDict.TryGetValue(currentDt, out double rVal))
+                        {
+                            y_rain[i] = -rVal; // 【核心魔法：映射为负数画倒挂！】
+                            if (rVal > globalMaxRain) globalMaxRain = rVal;
+                        }
+                    }
+
+                    var sigRain = MainChart.Plot.Add.Bars(xs, y_rain);
+                    string colorHex = palette[colorIdx % palette.Length];
+
+                    foreach (var bar in sigRain.Bars)
+                    {
+                        bar.FillColor = Color.FromHex(colorHex);
+                        bar.Size = 1.0 / 24.0;
+                        bar.LineColor = Colors.Transparent;
+                    }
+                    sigRain.Label = stationName == "Average" ? "Avg Rainfall" : stationName;
+                    sigRain.Axes.YAxis = yAxisRain;
+                    colorIdx++;
+                }
+
+                // 将降水轴设为 0 到 负向极值，迫使其挂在图表最顶端
+                MainChart.Plot.Axes.SetLimitsY(-globalMaxRain * 4, 0, yAxisRain);
+            }
+
+            // --- 5. 画布刷新与乱码修复 ---
             MainChart.Plot.Axes.DateTimeTicksBottom();
-            MainChart.Plot.Axes.Bottom.Label.Text = "Date and Hour";
+            MainChart.Plot.Axes.Bottom.Label.Text = "Date & Hour";
 
-            // 5. 图例设置
-            var legend = MainChart.Plot.ShowLegend();
-            legend.Alignment = Alignment.UpperCenter;
+            var legend = MainChart.Plot.ShowLegend(Alignment.UpperCenter);
             legend.Orientation = Orientation.Horizontal;
 
-            // 6. 刷新画布
-            MainChart.Plot.Title("Hourly Evolution of Network Structure Metrics");
-            // 限制初始视角只显示前 3 天（3天 * 24小时 = 72），这样 X 轴就会拉得很开
-            MainChart.Plot.Axes.SetLimitsX(xs[0], xs[Math.Min(72, xs.Length - 1)]);
+            // 【关键修复：解决图例中的中文站点乱码】
+            legend.FontName = "Microsoft YaHei";
+
+            MainChart.Plot.Axes.SetLimitsX(xs[0], xs[Math.Min(72, dataCount - 1)]);
             MainChart.Refresh();
         }
     }
