@@ -3,8 +3,10 @@
 <head>
     <meta charset="utf-8">
     <title>GeoVis Map</title>
-    <!-- 引入 Leaflet 样式 -->
+    <!-- 引入 Leaflet 和 ECharts -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <style>
         body {
             padding: 0;
@@ -20,45 +22,70 @@
         .leaflet-control-attribution {
             display: none;
         }
+
+        /* ECharts 悬浮面板样式 */
+        #chartPanel {
+            display: none; /* 默认隐藏 */
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 380px;
+            height: 260px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            z-index: 1000; /* 确保在地图图层之上 */
+            padding: 15px;
+            box-sizing: border-box;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+
+        #chartTitle {
+            font-weight: bold;
+            color: #4FC1E9;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        #echartsDom {
+            width: 100%;
+            height: 100%;
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
 
-    <!-- 引入 Leaflet 脚本 -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        // 1. 初始化地图容器和 CartoDB 底图
-        var map = L.map('map').setView([23.1291, 113.2644], 11);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19
-        }).addTo(map);
+    <!-- 悬浮的 ECharts 面板 -->
+    <div id="chartPanel">
+        <div id="chartTitle">实时气象站降水量</div>
+        <div id="echartsDom"></div>
+    </div>
 
-        // 2. 颜色阈值函数
+    <script>
+        // --- 1. 初始化地图 ---
+        var map = L.map('map').setView([23.1291, 113.2644], 11);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
         function getColor(d) {
             return d > 20000 ? '#800026' : d > 10000 ? '#BD0026' : d > 5000 ? '#E31A1C' :
                 d > 2000 ? '#FC4E2A' : d > 500 ? '#FD8D3C' : d > 100 ? '#FEB24C' : '#FFEDA0';
         }
 
-        // 【新增】：做差分析专属的冷暖双色 (红增蓝减)
         function getDiffColor(d) {
-            if (d > 500) return '#b2182b';  // 深红 (激增)
-            if (d > 100) return '#ef8a62';  // 浅红
-            if (d > 10) return '#fddbc7';  // 微红
-            if (d < -500) return '#2166ac'; // 深蓝 (骤降)
-            if (d < -100) return '#67a9cf'; // 浅蓝
-            if (d < -10) return '#d1e5f0'; // 微蓝
+            if (d > 500) return '#b2182b'; if (d > 100) return '#ef8a62'; if (d > 10) return '#fddbc7';
+            if (d < -500) return '#2166ac'; if (d < -100) return '#67a9cf'; if (d < -10) return '#d1e5f0';
             return 'transparent';
         }
 
         var geoJsonLayer;
 
-        // 3. 渲染 GeoJSON 的核心函数
-        function renderGeoData(geoData) {
+        // --- 2. 渲染网格核心函数 ---
+        function renderGeoData(dataObj) {
             try {
                 if (geoJsonLayer) map.removeLayer(geoJsonLayer);
-                var dataObj = typeof geoData === 'string' ? JSON.parse(geoData) : geoData;
-                var mode = dataObj.map_mode; // 获取 C# 传来的模式
+                var mode = dataObj.map_mode;
+                var odMode = dataObj.od_display_mode;
 
                 geoJsonLayer = L.geoJSON(dataObj, {
                     style: function (feature) {
@@ -66,13 +93,16 @@
                         var v2 = feature.properties.val2 || 0;
                         var fillCol = "transparent";
 
-                        // 根据模式决定染色逻辑
                         if (mode === '驻留人口与变化 (做差)') {
-                            fillCol = getDiffColor(v2); // 做差模式用 val2(环比变化量) 渲染冷暖色
+                            fillCol = getDiffColor(v2);
+                        } else if (mode === 'OD 流出与流入') {
+                            var renderVal = v1;
+                            if (odMode === '流入流量') renderVal = v2;
+                            if (odMode === '总流量') renderVal = v1 + v2;
+                            fillCol = renderVal > 0 ? getColor(renderVal) : "transparent";
                         } else {
-                            fillCol = v1 > 0 ? getColor(v1) : "transparent"; // 其他模式用 val1 渲染热力图
+                            fillCol = v1 > 0 ? getColor(v1) : "transparent";
                         }
-
                         return { fillColor: fillCol, weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: 0.8 };
                     },
                     onEachFeature: function (feature, layer) {
@@ -82,10 +112,17 @@
                         var tooltipHtml = `<div style="font-family: Arial; font-size: 13px;"><b>网格 ID:</b> ${cid}<br/>`;
 
                         if (mode === 'OD 流出与流入') {
-                            tooltipHtml += `<span style="color: #E31A1C;">● 流出: ${v1}</span><br/><span style="color: #1F78B4;">● 流入: ${v2}</span>`;
+                            var total = v1 + v2;
+                            var outBold = odMode === '流出流量' ? 'font-weight:bold;font-size:14px;background:#fde0dd;' : '';
+                            var inBold = odMode === '流入流量' ? 'font-weight:bold;font-size:14px;background:#deebf7;' : '';
+                            var totBold = odMode === '总流量' ? 'font-weight:bold;font-size:14px;background:#f0f0f0;' : '';
+
+                            tooltipHtml += `<span style="color: #E31A1C; display:block; ${outBold}">● 流出: ${v1}</span>` +
+                                `<span style="color: #1F78B4; display:block; ${inBold}">● 流入: ${v2}</span>` +
+                                `<span style="color: #333333; display:block; ${totBold}">● 总流量: ${total}</span>`;
                         } else if (mode === '驻留人口与变化 (做差)') {
                             var changeStr = v2 > 0 ? `<span style="color:#b2182b;">↑ 增加 ${v2}</span>` : `<span style="color:#2166ac;">↓ 减少 ${Math.abs(v2)}</span>`;
-                            tooltipHtml += `● 当前驻留: ${v1}<br/>● 环比变化: ${changeStr}`;
+                            tooltipHtml += `● 选定驻留: ${v1}<br/>● 差值变化: ${changeStr}`;
                         } else {
                             tooltipHtml += `● 常住人口: ${v1}<br/>● 联通推算: ${v2}`;
                         }
@@ -96,9 +133,52 @@
             } catch (e) { console.error(e); }
         }
 
-        // 4. 监听 C# 发来的消息
+        // --- 3. 初始化 ECharts ---
+        var myChart = echarts.init(document.getElementById('echartsDom'));
+
+        function renderECharts(chartData) {
+            var panel = document.getElementById('chartPanel');
+            if (!chartData || !chartData.show) {
+                panel.style.display = 'none'; // 隐藏弹窗
+                return;
+            }
+
+            // 【核心修复】：必须先设为 block，让 DOM 拥有宽高，然后再 resize！
+            panel.style.display = 'block';
+            myChart.resize();
+
+            document.getElementById('chartTitle').innerText = `实时气象站降水量 (时间 ${chartData.time})`;
+
+            var option = {
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                grid: { left: '3%', right: '4%', bottom: '15%', top: '15%', containLabel: true },
+                xAxis: {
+                    type: 'category',
+                    data: chartData.stations,
+                    axisLabel: { interval: 0, rotate: 30, fontSize: 10 } // 倾斜防重叠
+                },
+                yAxis: { type: 'value', name: '降水(mm)', nameTextStyle: { fontSize: 10 } },
+                series: [{
+                    data: chartData.values,
+                    type: 'bar',
+                    itemStyle: { color: '#4FC1E9', borderRadius: [2, 2, 0, 0] },
+                    label: { show: true, position: 'top', formatter: '{c}' }
+                }]
+            };
+            // 设置数据加上 true 参数，强制每次清空旧数据重新渲染，确保取消勾选时柱子能消失
+            myChart.setOption(option, true);
+        }
+
+        // --- 4. 统一的消息分发中心 ---
         window.chrome.webview.addEventListener('message', event => {
-            renderGeoData(event.data);
+            var payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+
+            // 根据 C# 传来的 type 字段，决定渲染地图还是图表
+            if (payload.type === 'rainfall_chart') {
+                renderECharts(payload);
+            } else {
+                renderGeoData(payload); // 默认渲染地图 GeoJSON
+            }
         });
     </script>
 </body>

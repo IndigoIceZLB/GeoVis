@@ -65,16 +65,32 @@ namespace GeoVis.Views
 
         private void ViewModel_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
+            var vm = (MainViewModel)sender;
+
             if (e.PropertyName == nameof(MainViewModel.NetworkMetricsData))
             {
-                var vm = (MainViewModel)sender;
                 RenderAcademicChart(vm);
+            }
+            // 【新增】：监听锁定状态的切换
+            else if (e.PropertyName == nameof(MainViewModel.IsYAxisLocked))
+            {
+                MainChart.Plot.Axes.Rules.Clear(); // 每次切换先清空规则
+                if (vm.IsYAxisLocked)
+                {
+                    // 动态遍历所有Y轴（主轴、副轴、降水倒挂轴）并加上纵向锁定规则
+                    foreach (var yAxis in MainChart.Plot.Axes.GetAxes().OfType<ScottPlot.IYAxis>())
+                    {
+                        MainChart.Plot.Axes.Rules.Add(new ScottPlot.AxisRules.LockedVertical(yAxis, yAxis.Min, yAxis.Max));
+                    }
+                }
+                MainChart.Refresh();
             }
         }
 
         private void RenderAcademicChart(MainViewModel vm)
         {
             MainChart.Reset(); // 彻底清理旧画布
+            MainChart.Plot.Axes.Rules.Clear(); // 画新图时必须清空约束规则，否则会导致无法自动缩放！
 
             bool isOdMode = vm.SelectedChartMode == "OD 轨迹流量";
 
@@ -99,7 +115,6 @@ namespace GeoVis.Views
                 else
                 {
                     var m = vm.MobilityMetricsData[i];
-                    // 处理 date 字符串 (如 "2023-05-01") + hour
                     DateTime dt = Convert.ToDateTime(m.DateStr).AddHours(m.Hour);
                     xs[i] = dt.ToOADate();
                     y_primary[i] = m.TotalSignal;
@@ -116,7 +131,7 @@ namespace GeoVis.Views
             MainChart.Plot.Axes.Left.Label.ForeColor = sigPrimary.Color;
             MainChart.Plot.Axes.SetLimitsY(0, y_primary.Max() * 1.5, MainChart.Plot.Axes.Left);
 
-            // --- 3. 绘制副线 (右轴，仅 OD 模式有) ---
+            // --- 3. 绘制副线 (右轴) ---
             if (isOdMode)
             {
                 var sigSec = MainChart.Plot.Add.ScatterLine(xs, y_secondary);
@@ -131,31 +146,29 @@ namespace GeoVis.Views
             }
             else
             {
-                MainChart.Plot.Axes.Right.IsVisible = false; // 驻留模式隐藏右轴
+                MainChart.Plot.Axes.Right.IsVisible = false;
             }
 
-            // --- 4. 完美倒挂降水柱状图 (负值映射法) ---
+            // --- 4. 完美倒挂降水柱状图 ---
             if (vm.RainfallMultiData != null && vm.RainfallMultiData.Any())
             {
                 var yAxisRain = MainChart.Plot.Axes.AddLeftAxis();
                 yAxisRain.Label.Text = "Rainfall (mm)";
                 yAxisRain.Label.ForeColor = Color.FromHex("#4FC1E9");
 
-                // 巧妙：格式化刻度线，把负数显示为正数，完美欺骗视觉！
+                // 【修复1：刻度精度】：避免放大时出现 9, 9, 9...
                 yAxisRain.TickGenerator = new ScottPlot.TickGenerators.NumericAutomatic()
                 {
-                    LabelFormatter = val => Math.Abs(val).ToString("0")
+                    LabelFormatter = val => Math.Abs(val).ToString("0.##")
                 };
 
                 double globalMaxRain = 1;
-
-                // 准备一组带高透明度的好看颜色
                 string[] palette = { "#4A4FC1E9", "#4AED5565", "#4AA0D468", "#4AFFCE54", "#4AAC92EC" };
                 int colorIdx = 0;
 
                 foreach (var kvp in vm.RainfallMultiData)
                 {
-                    string stationName = kvp.Key;
+                    string stationId = kvp.Key; // 此时字典的 Key 已经是没有乱码的 station_id 了
                     var rainDict = kvp.Value;
                     double[] y_rain = new double[dataCount];
 
@@ -164,7 +177,7 @@ namespace GeoVis.Views
                         DateTime currentDt = DateTime.FromOADate(xs[i]);
                         if (rainDict.TryGetValue(currentDt, out double rVal))
                         {
-                            y_rain[i] = -rVal; // 【核心魔法：映射为负数画倒挂！】
+                            y_rain[i] = -rVal;
                             if (rVal > globalMaxRain) globalMaxRain = rVal;
                         }
                     }
@@ -178,13 +191,13 @@ namespace GeoVis.Views
                         bar.Size = 1.0 / 24.0;
                         bar.LineColor = Colors.Transparent;
                     }
-                    sigRain.Label = stationName == "Average" ? "Avg Rainfall" : stationName;
+                    sigRain.Label = stationId == "Average" ? "Avg Rainfall" : stationId; // 图例直接用ID
                     sigRain.Axes.YAxis = yAxisRain;
                     colorIdx++;
                 }
 
-                // 将降水轴设为 0 到 负向极值，迫使其挂在图表最顶端
-                MainChart.Plot.Axes.SetLimitsY(-globalMaxRain * 4, 0, yAxisRain);
+                // 【修复2：上移柱状图】：乘数由 4 改为 8，使柱状图纵向大幅收缩，紧贴图表顶部
+                MainChart.Plot.Axes.SetLimitsY(-globalMaxRain * 8, 0, yAxisRain);
             }
 
             // --- 5. 画布刷新与乱码修复 ---
@@ -193,12 +206,21 @@ namespace GeoVis.Views
 
             var legend = MainChart.Plot.ShowLegend(Alignment.UpperCenter);
             legend.Orientation = Orientation.Horizontal;
-
-            // 【关键修复：解决图例中的中文站点乱码】
-            legend.FontName = "Microsoft YaHei";
+            legend.FontName = "Microsoft YaHei"; // 保险起见保留字体设置
 
             MainChart.Plot.Axes.SetLimitsX(xs[0], xs[Math.Min(72, dataCount - 1)]);
+
+            // 【新增逻辑】：在完成了最佳比例缩放后，如果此时系统处于"锁定"状态，自动把 Y 轴焊死！
+            if (vm.IsYAxisLocked)
+            {
+                foreach (var yAxis in MainChart.Plot.Axes.GetAxes().OfType<ScottPlot.IYAxis>())
+                {
+                    MainChart.Plot.Axes.Rules.Add(new ScottPlot.AxisRules.LockedVertical(yAxis, yAxis.Min, yAxis.Max));
+                }
+            }
+
             MainChart.Refresh();
         }
+       
     }
 }

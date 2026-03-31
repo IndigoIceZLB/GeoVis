@@ -12,7 +12,9 @@
         WindowStartupLocation="CenterScreen"
         Background="#ECEFF1"
         FontFamily="Microsoft YaHei, Segoe UI">
-
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </Window.Resources>
     <!-- 绑定 DataContext 到 MainViewModel -->
     <Window.DataContext>
         <vm:MainViewModel />
@@ -90,6 +92,80 @@
                             <ComboBox ItemsSource="{Binding MapModes}" 
                                       SelectedItem="{Binding SelectedMapMode}" 
                                       Margin="0,0,0,15" Background="White" Padding="5"/>
+                            <!-- 1. OD 专属控制 -->
+                            <StackPanel Margin="0,0,0,10">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="OD 流出与流入">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="OD 渲染指标:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                <ComboBox ItemsSource="{Binding OdDisplayModes}" SelectedItem="{Binding SelectedOdDisplayMode}" Background="White"/>
+                            </StackPanel>
+
+                            <!-- 2. 做差专属控制 -->
+                            <StackPanel Margin="0,0,0,10">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="驻留人口与变化 (做差)">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="做差对比基准:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                <ComboBox ItemsSource="{Binding DiffModes}" SelectedItem="{Binding SelectedDiffMode}" Background="White" Margin="0,0,0,5"/>
+                                <!-- 只有选特定日期才显示这个日期选择器 -->
+                                <ComboBox ItemsSource="{Binding AvailableDates}" SelectedItem="{Binding ReferenceDate}" Background="#FFF3E0">
+                                    <ComboBox.Style>
+                                        <Style TargetType="ComboBox">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SelectedDiffMode}" Value="与选定日期同时间做差">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ComboBox.Style>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <!-- 3. 地图降水悬浮窗控制 -->
+                            <StackPanel Margin="0,10,0,10">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="地图微观气象观测:" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,5"/>
+                                <CheckBox Content="右下角开启当小时降水柱状图" IsChecked="{Binding ShowMapRainfall}" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,0,5"/>
+
+                                <StackPanel Visibility="{Binding ShowMapRainfall, Converter={StaticResource BoolToVis}}">
+                                    <!-- 【新增】一键全选复选框 -->
+                                    <CheckBox Content="✅ 一键全选气象站" IsChecked="{Binding IsAllStationsSelected}" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,0,5"/>
+                                    <ListBox ItemsSource="{Binding MapStations}" Height="120" BorderBrush="#E0E0E0" Background="White">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <!-- 【重点修复】：增加 UpdateSourceTrigger=PropertyChanged 确保立即响应 -->
+                                                <CheckBox Content="{Binding StationId}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" 
+                                                          Command="{Binding DataContext.UpdateMapRainfallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </StackPanel>
                             <!-- 日期选择下拉框 -->
                             <TextBlock Text="选择日期:" Foreground="#546E7A" Margin="0,0,0,5"/>
                             <ComboBox ItemsSource="{Binding AvailableDates}" 
@@ -139,6 +215,12 @@
                             <ComboBox Width="180" Margin="5,0,0,0" 
                                   ItemsSource="{Binding AvailableStations}" 
                                   SelectedItem="{Binding SelectedStation}"/>
+
+                            <!-- 【新增】：锁定Y轴控件 -->
+                            <CheckBox Content="🔒 锁定Y轴 (仅X轴滑动)" IsChecked="{Binding IsYAxisLocked}" 
+                                      VerticalAlignment="Center" Margin="20,0,0,0" 
+                                      FontWeight="Bold" Foreground="#D32F2F" 
+                                      ToolTip="锁定所有指标的 Y 轴比例，方便左右拖拽查看全天数据"/>
                         </StackPanel>
                     </Border>
 
@@ -148,7 +230,7 @@
 
             <!-- Tab 2: WebView2 空间地图 -->
             <TabItem Header="🗺️ 空间底图呈现" FontSize="14">
-                <!-- 这里的 CreationProperties 可用于配置数据文件夹路径等高级功能 -->
+                <!-- 纯净的 WebView2，ECharts 会在其内部 DOM 渲染，绝不会发生遮挡问题！ -->
                 <wv2:WebView2 x:Name="MapWebView" />
             </TabItem>
         </TabControl>

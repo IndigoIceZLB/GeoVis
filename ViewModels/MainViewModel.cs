@@ -32,10 +32,34 @@ namespace GeoVis.ViewModels
         // 新增一个属性：用来存放查询出的网络指标数据
         [ObservableProperty]
         private List<HourlyNetworkMetric> _networkMetricsData;
-
+        private int _selectedDate;
+        public int SelectedDate
+        {
+            get => _selectedDate;
+            set
+            {
+                if (SetProperty(ref _selectedDate, value))
+                {
+                    _ = UpdateMapByTimeAsync();
+                    _ = UpdateMapRainfallAsync(); // 同步更新右下角降水图表
+                }
+            }
+        }
         [ObservableProperty] private List<int> _availableDates;
-        [ObservableProperty] private int _selectedDate;
-        [ObservableProperty] private int _selectedHour = 8; // 默认早上 8 点
+
+        private int _selectedHour = 8;
+        public int SelectedHour
+        {
+            get => _selectedHour;
+            set
+            {
+                if (SetProperty(ref _selectedHour, value))
+                {
+                    _ = UpdateMapByTimeAsync();
+                    _ = UpdateMapRainfallAsync(); // 拖动滑块时，图表也跟着变！
+                }
+            }
+        }
 
         [ObservableProperty] private List<string> _availableStations;
         [ObservableProperty] private string _selectedStation;
@@ -52,9 +76,66 @@ namespace GeoVis.ViewModels
         [ObservableProperty] private List<string> _mapModes = new() { "OD 流出与流入", "驻留人口与变化 (做差)", "月度常住人口" };
         [ObservableProperty] private string _selectedMapMode = "OD 流出与流入";
 
+        // 【新增】：用于控制Y轴锁定的属性
+        [ObservableProperty] private bool _isYAxisLocked = false;
+
+        // 【新增】：空间分析扩展属性
+        [ObservableProperty] private List<string> _odDisplayModes = new() { "总流量", "流出流量", "流入流量" };
+        private string _selectedOdDisplayMode = "总流量";
+        public string SelectedOdDisplayMode
+        {
+            get => _selectedOdDisplayMode;
+            set { if (SetProperty(ref _selectedOdDisplayMode, value)) _ = UpdateMapByTimeAsync(); }
+        }
+
+        [ObservableProperty] private List<string> _diffModes = new() { "与上一小时做差", "与选定日期同时间做差" };
+        private string _selectedDiffMode = "与上一小时做差";
+        public string SelectedDiffMode
+        {
+            get => _selectedDiffMode;
+            set { if (SetProperty(ref _selectedDiffMode, value)) _ = UpdateMapByTimeAsync(); }
+        }
+        private int _referenceDate;
+        public int ReferenceDate
+        {
+            get => _referenceDate;
+            set { if (SetProperty(ref _referenceDate, value)) _ = UpdateMapByTimeAsync(); }
+        }
+
+        [ObservableProperty] private System.Collections.ObjectModel.ObservableCollection<StationSelectionItem> _mapStations = new();
+        private bool _showMapRainfall = false;
+        public bool ShowMapRainfall
+        {
+            get => _showMapRainfall;
+            set
+            {
+                if (SetProperty(ref _showMapRainfall, value))
+                {
+                    // 勾选或取消勾选时，立即向前端发送显示/隐藏指令
+                    _ = UpdateMapRainfallAsync();
+                }
+            }
+        }
+
+        // 【新增】：一键全选气象站功能
+        private bool _isAllStationsSelected = false;
+        public bool IsAllStationsSelected
+        {
+            get => _isAllStationsSelected;
+            set
+            {
+                if (SetProperty(ref _isAllStationsSelected, value))
+                {
+                    // 遍历所有站点，强制设为全选/取消全选状态
+                    foreach (var s in MapStations) s.IsSelected = value;
+                    // 主动触发一次数据库查询与图表重绘
+                    _ = UpdateMapRainfallAsync();
+                }
+            }
+        }
 
         // 用于在内存中缓存基础的 GeoJSON 字符串，避免频繁读盘
-        private string _baseGeoJson = null;
+        private string _baseGeoJson = null;        
 
         public MainViewModel()
         {
@@ -143,32 +224,19 @@ namespace GeoVis.ViewModels
             }
         }
 
-        // 当 UI 下拉框选择了新日期时，Toolkit 会自动调用这个方法
-        partial void OnSelectedDateChanged(int value)
-        {
-            _ = UpdateMapByTimeAsync();
-        }
-
-        // 当 UI 滑块拖动了新小时时，Toolkit 会自动调用这个方法
-        partial void OnSelectedHourChanged(int value)
-        {
-            _ = UpdateMapByTimeAsync();
-        }
-
         // 核心：根据当前选中的时间和小时，重新计算并推送 JSON
         private async Task UpdateMapByTimeAsync()
         {
             if (string.IsNullOrEmpty(_baseGeoJson) || SelectedDate == 0) return;
 
-            // 1. 调用新的全能统一查询
-            var flowDict = await _dataService.GetSpatialDataAsync(SelectedMapMode, SelectedDate, SelectedHour);
+            // 传入新的 DiffMode 和 RefDate
+            var flowDict = await _dataService.GetSpatialDataAsync(SelectedMapMode, SelectedDate, SelectedHour, SelectedDiffMode, ReferenceDate);
 
             string modifiedJson = await Task.Run(() =>
             {
                 var jNode = JsonNode.Parse(_baseGeoJson);
-
-                // 【核心】：把当前图层模式告诉前端 JS！
                 jNode["map_mode"] = SelectedMapMode;
+                jNode["od_display_mode"] = SelectedOdDisplayMode; // 【新增】告诉 JS 我们选了什么指标
 
                 foreach (var feature in jNode["features"].AsArray())
                 {
@@ -200,6 +268,14 @@ namespace GeoVis.ViewModels
                 if (mobility != null && mobility.Any()) MobilityMetricsData = mobility;
 
                 OnPropertyChanged(nameof(SelectedChartMode)); // 触发一次画图
+
+                // 初始化气象站复选框列表 (剔除关闭和全选选项)
+                if (stations.Any())
+                {
+                    MapStations.Clear();
+                    foreach (var s in stations.Skip(3)) MapStations.Add(new StationSelectionItem { StationId = s, IsSelected = false });
+                    ReferenceDate = AvailableDates.FirstOrDefault(); // 默认基准日期
+                }
             }
             catch { }
         }
@@ -243,5 +319,39 @@ namespace GeoVis.ViewModels
                 OnPropertyChanged(nameof(NetworkMetricsData));
             }
         }
+
+        [RelayCommand] // 气象站复选框点击后触发此命令
+        private async Task UpdateMapRainfallAsync()
+        {
+            // 如果没开启或者没选日期，发送隐藏图表的指令
+            if (!ShowMapRainfall || SelectedDate == 0)
+            {
+                var emptyPayload = new { type = "rainfall_chart", show = false };
+                OnGeoJsonReadyToSend?.Invoke(System.Text.Json.JsonSerializer.Serialize(emptyPayload));
+                return;
+            }
+
+            var selectedIds = MapStations.Where(x => x.IsSelected).Select(x => x.StationId).ToList();
+            var data = await _dataService.GetMapRainfallAsync(selectedIds, SelectedDate, SelectedHour);
+
+            // 构建发给 ECharts 的动态 JSON
+            var chartPayload = new
+            {
+                type = "rainfall_chart",
+                show = true,
+                time = $"{SelectedHour:D2}:00",
+                stations = data.Keys.ToList(),
+                values = data.Values.ToList()
+            };
+
+            // 直接通过已有的高频通道发给浏览器
+            OnGeoJsonReadyToSend?.Invoke(System.Text.Json.JsonSerializer.Serialize(chartPayload));
+        }
+    }
+
+    public partial class StationSelectionItem : ObservableObject
+    {
+        [ObservableProperty] private string _stationId;
+        [ObservableProperty] private bool _isSelected;
     }
 }

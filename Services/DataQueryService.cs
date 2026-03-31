@@ -111,19 +111,17 @@ namespace GeoVis.Services
         /// <summary>
         /// 终极空间查询：根据模式、日期、小时，返回统一格式的数值字典 (Id -> Val1, Val2)
         /// </summary>
-        public async Task<Dictionary<string, (long Val1, long Val2)>> GetSpatialDataAsync(string mode, int targetDate, int targetHour)
+        public async Task<Dictionary<string, (long Val1, long Val2)>> GetSpatialDataAsync(string mode, int targetDate, int targetHour, string diffMode = "与上一小时做差", int refDate = 0)
         {
             return await Task.Run(() =>
             {
                 using var conn = DuckDbFactory.GetConnection();
                 string sql = "";
 
-                // 将 20230501 转为 2023-05-01，以适配不同 CSV 的日期格式
                 string dateStr = DateTime.ParseExact(targetDate.ToString(), "yyyyMMdd", null).ToString("yyyy-MM-dd");
 
                 if (mode == "OD 流出与流入")
                 {
-                    // Val1 = 流出, Val2 = 流入
                     sql = $@"
                         SELECT CAST(grid_id AS VARCHAR) AS Id, CAST(SUM(outflow) AS BIGINT) AS Val1, CAST(SUM(inflow) AS BIGINT) AS Val2
                         FROM (
@@ -135,21 +133,29 @@ namespace GeoVis.Services
                 }
                 else if (mode == "驻留人口与变化 (做差)")
                 {
-                    // 【核心做差魔法】：Val1 = 当前小时驻留量, Val2 = 环比变化量 (当前小时 - 上一小时)
-                    sql = $@"
-                        WITH current_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour} GROUP BY grid_id),
-                             prev_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour - 1} GROUP BY grid_id)
-                        SELECT 
-                            CAST(c.grid_id AS VARCHAR) AS Id, 
-                            CAST(c.val AS BIGINT) AS Val1, 
-                            CAST(COALESCE(c.val,0) - COALESCE(p.val,0) AS BIGINT) AS Val2
-                        FROM current_hr c
-                        LEFT JOIN prev_hr p ON c.grid_id = p.grid_id;
-                    ";
+                    // 【修改】：判断是上个小时做差，还是用特定日期做差
+                    if (diffMode == "与选定日期同时间做差" && refDate > 0)
+                    {
+                        string refDateStr = DateTime.ParseExact(refDate.ToString(), "yyyyMMdd", null).ToString("yyyy-MM-dd");
+                        sql = $@"
+                            WITH current_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour} GROUP BY grid_id),
+                                 prev_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{refDateStr}%' AND hour = {targetHour} GROUP BY grid_id)
+                            SELECT CAST(c.grid_id AS VARCHAR) AS Id, CAST(c.val AS BIGINT) AS Val1, CAST(COALESCE(c.val,0) - COALESCE(p.val,0) AS BIGINT) AS Val2
+                            FROM current_hr c LEFT JOIN prev_hr p ON c.grid_id = p.grid_id;
+                        ";
+                    }
+                    else
+                    {
+                        sql = $@"
+                            WITH current_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour} GROUP BY grid_id),
+                                 prev_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour - 1} GROUP BY grid_id)
+                            SELECT CAST(c.grid_id AS VARCHAR) AS Id, CAST(c.val AS BIGINT) AS Val1, CAST(COALESCE(c.val,0) - COALESCE(p.val,0) AS BIGINT) AS Val2
+                            FROM current_hr c LEFT JOIN prev_hr p ON c.grid_id = p.grid_id;
+                        ";
+                    }
                 }
                 else if (mode == "月度常住人口")
                 {
-                    // 静态月度数据，不区分日期和小时。Val1 = 真实人口, Val2 = 联通信令
                     sql = "SELECT CAST(grid_id AS VARCHAR) AS Id, CAST(SUM(real_pop_sum) AS BIGINT) AS Val1, CAST(SUM(unicom_cnt) AS BIGINT) AS Val2 FROM pop_data GROUP BY grid_id;";
                 }
 
@@ -157,12 +163,43 @@ namespace GeoVis.Services
                 var dict = new Dictionary<string, (long, long)>();
                 foreach (var row in list)
                 {
-                    // 显式转换，打破 dynamic 的魔咒
+                    // 先用强类型局部变量接住，彻底切断 dynamic 的隐式推断传染
                     string id = Convert.ToString(row.Id);
                     long v1 = Convert.ToInt64(row.Val1);
                     long v2 = Convert.ToInt64(row.Val2);
 
+                    // 用纯强类型变量构建 Tuple，安全入字典
                     dict[id] = (v1, v2);
+                }
+                return dict;
+            });
+        }
+
+        /// <summary>
+        /// 【新增】：极速获取选定气象站集合在【指定日期和小时】的降水量
+        /// </summary>
+        public async Task<Dictionary<string, double>> GetMapRainfallAsync(List<string> stationNames, int targetDate, int targetHour)
+        {
+            if (stationNames == null || !stationNames.Any()) return new Dictionary<string, double>();
+            return await Task.Run(() =>
+            {
+                using var conn = DuckDbFactory.GetConnection();
+                string dateStr = DateTime.ParseExact(targetDate.ToString(), "yyyyMMdd", null).ToString("yyyy-MM-dd");
+
+                // 为了兼容可能存在的毫秒格式，采用 LIKE '%YYYY-MM-DD HH:%' 模糊匹配
+                string timePattern = $"%{dateStr} {targetHour:D2}:%";
+
+                // 【核心修复】：UI传过来的是中文站名，所以必须用 station 字段过滤，而不是 station_id！
+                string stationsIn = string.Join(",", stationNames.Select(s => $"'{s}'"));
+
+                // 查询时把 station_id 选出来作为 X 轴图例返回（简短且更具学术性）
+                string sql = $"SELECT station_id AS Station, precip_mm AS Value FROM rainfall_data WHERE CAST(timestamp AS VARCHAR) LIKE '{timePattern}' AND station IN ({stationsIn});";
+
+                var list = conn.Query(sql);
+                var dict = new Dictionary<string, double>();
+                foreach (var row in list)
+                {
+                    try { dict[row.Station.ToString()] = Convert.ToDouble(row.Value); } catch { }
                 }
                 return dict;
             });
@@ -271,7 +308,8 @@ namespace GeoVis.Services
                 string sql;
                 if (stationName == "ALL STATIONS (Overlay 全叠加)")
                 {
-                    sql = "SELECT station AS Station, timestamp AS Time, precip_mm AS Value FROM rainfall_data;";
+                    // 【修改】：使用 station_id 代替 station 作为图例标识
+                    sql = "SELECT station_id AS Station, timestamp AS Time, precip_mm AS Value FROM rainfall_data;";
                 }
                 else if (stationName == "ALL STATIONS (Average 平均)")
                 {
@@ -279,7 +317,8 @@ namespace GeoVis.Services
                 }
                 else
                 {
-                    sql = $"SELECT station AS Station, timestamp AS Time, precip_mm AS Value FROM rainfall_data WHERE station = '{stationName}';";
+                    // 【修改】：条件查的是 station，但返回的是 station_id 给图表画图例用！
+                    sql = $"SELECT station_id AS Station, timestamp AS Time, precip_mm AS Value FROM rainfall_data WHERE station = '{stationName}';";
                 }
 
                 var list = conn.Query(sql);
