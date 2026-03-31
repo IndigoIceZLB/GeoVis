@@ -88,44 +88,64 @@
                     <Border Background="#F5F7FA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,15,0,0">
                         <StackPanel>
                             <TextBlock Text="空间时间切片控制" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,10"/>
+
+                            <!-- 1. 基础图层 -->
                             <TextBlock Text="空间渲染图层:" Foreground="#546E7A" Margin="0,0,0,5"/>
-                            <ComboBox ItemsSource="{Binding MapModes}" 
-                                      SelectedItem="{Binding SelectedMapMode}" 
-                                      Margin="0,0,0,15" Background="White" Padding="5"/>
-                            <!-- 1. OD 专属控制 -->
+                            <ComboBox ItemsSource="{Binding MapModes}" SelectedItem="{Binding SelectedMapMode}" Margin="0,0,0,10" Background="White"/>
+
+                            <!-- 2. OD专属：渲染指标 (选OD时才出现) -->
                             <StackPanel Margin="0,0,0,10">
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel">
                                         <Setter Property="Visibility" Value="Collapsed"/>
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="OD 流出与流入">
+                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="OD 轨迹流向">
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </StackPanel.Style>
-                                <TextBlock Text="OD 渲染指标:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                <TextBlock Text="OD 核心观测指标:" Foreground="#546E7A" Margin="0,0,0,5"/>
                                 <ComboBox ItemsSource="{Binding OdDisplayModes}" SelectedItem="{Binding SelectedOdDisplayMode}" Background="White"/>
                             </StackPanel>
 
-                            <!-- 2. 做差专属控制 -->
+                            <!-- 3. 通用：数据分析模式 (除了常住人口不显示) -->
+                            <StackPanel Margin="0,0,0,10">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="空间数据分析模式:" Foreground="#546E7A" Margin="0,0,0,5" FontWeight="Bold"/>
+                                <ComboBox ItemsSource="{Binding AnalysisModes}" SelectedItem="{Binding SelectedAnalysisMode}" Background="#E3F2FD" BorderBrush="#90CAF9" FontWeight="Bold"/>
+                            </StackPanel>
+
+                            <!-- 4. 做差专属：做差对比基准 (只有选了做差模式才显示) -->
                             <StackPanel Margin="0,0,0,10">
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel">
                                         <Setter Property="Visibility" Value="Collapsed"/>
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="驻留人口与变化 (做差)">
+                                            <DataTrigger Binding="{Binding SelectedAnalysisMode}" Value="时空环比做差">
                                                 <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </StackPanel.Style>
-                                <TextBlock Text="做差对比基准:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                <TextBlock Text="差值计算参考基准:" Foreground="#546E7A" Margin="0,0,0,5"/>
                                 <ComboBox ItemsSource="{Binding DiffModes}" SelectedItem="{Binding SelectedDiffMode}" Background="White" Margin="0,0,0,5"/>
-                                <!-- 只有选特定日期才显示这个日期选择器 -->
-                                <ComboBox ItemsSource="{Binding AvailableDates}" SelectedItem="{Binding ReferenceDate}" Background="#FFF3E0">
-                                    <ComboBox.Style>
-                                        <Style TargetType="ComboBox">
+                                <!-- 日期多选框 -->
+                                <ListBox ItemsSource="{Binding ReferenceDates}" Height="85" Background="#FFF3E0" BorderBrush="#FFCC80">
+                                    <ListBox.Style>
+                                        <Style TargetType="ListBox">
                                             <Setter Property="Visibility" Value="Collapsed"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding SelectedDiffMode}" Value="与选定日期同时间做差">
@@ -133,8 +153,13 @@
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
-                                    </ComboBox.Style>
-                                </ComboBox>
+                                    </ListBox.Style>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <CheckBox Content="{Binding DisplayDate}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                             </StackPanel>
 
                             <!-- 3. 地图降水悬浮窗控制 -->

@@ -25,19 +25,21 @@
 
         /* ECharts 悬浮面板样式 */
         #chartPanel {
-            display: none; /* 默认隐藏 */
+            display: none;
             position: absolute;
             bottom: 20px;
             right: 20px;
-            width: 380px;
-            height: 260px;
+            width: 600px; /* 【修改】：基础宽度扩宽到 1.5倍 */
+            height: 280px;
             background: rgba(255, 255, 255, 0.95);
             border-radius: 8px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            z-index: 1000; /* 确保在地图图层之上 */
+            z-index: 1000;
             padding: 15px;
             box-sizing: border-box;
             font-family: 'Microsoft YaHei', sans-serif;
+            resize: both; /* 【新增】：允许用户在右下角自由拖拽拉伸大小！ */
+            overflow: hidden; /* 配合 resize 必须的属性 */
         }
 
         #chartTitle {
@@ -84,8 +86,9 @@
         function renderGeoData(dataObj) {
             try {
                 if (geoJsonLayer) map.removeLayer(geoJsonLayer);
-                var mode = dataObj.map_mode;
-                var odMode = dataObj.od_display_mode;
+                var mode = dataObj.map_mode; // 'OD 轨迹流向', '网格驻留人口', '月度常住人口'
+                var odMode = dataObj.od_display_mode; // '总流量', '流出流量', '流入流量'
+                var analysisMode = dataObj.analysis_mode; // '绝对值分布', '时空环比做差'
 
                 geoJsonLayer = L.geoJSON(dataObj, {
                     style: function (feature) {
@@ -93,15 +96,19 @@
                         var v2 = feature.properties.val2 || 0;
                         var fillCol = "transparent";
 
-                        if (mode === '驻留人口与变化 (做差)') {
-                            fillCol = getDiffColor(v2);
-                        } else if (mode === 'OD 流出与流入') {
-                            var renderVal = v1;
-                            if (odMode === '流入流量') renderVal = v2;
-                            if (odMode === '总流量') renderVal = v1 + v2;
-                            fillCol = renderVal > 0 ? getColor(renderVal) : "transparent";
+                        // 【核心渲染逻辑解耦】
+                        if (analysisMode === '时空环比做差') {
+                            fillCol = getDiffColor(v2); // 做差模式下，后端统一将差值塞在 v2 里
                         } else {
-                            fillCol = v1 > 0 ? getColor(v1) : "transparent";
+                            if (mode === 'OD 轨迹流向') {
+                                // 绝对值模式下，OD 依然保持原来的 v1(出), v2(入) 结构
+                                var renderVal = v1;
+                                if (odMode === '流入流量') renderVal = v2;
+                                if (odMode === '总流量') renderVal = v1 + v2;
+                                fillCol = renderVal > 0 ? getColor(renderVal) : "transparent";
+                            } else {
+                                fillCol = v1 > 0 ? getColor(v1) : "transparent";
+                            }
                         }
                         return { fillColor: fillCol, weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: 0.8 };
                     },
@@ -111,20 +118,25 @@
                         var cid = feature.properties.cid || "未知";
                         var tooltipHtml = `<div style="font-family: Arial; font-size: 13px;"><b>网格 ID:</b> ${cid}<br/>`;
 
-                        if (mode === 'OD 流出与流入') {
-                            var total = v1 + v2;
-                            var outBold = odMode === '流出流量' ? 'font-weight:bold;font-size:14px;background:#fde0dd;' : '';
-                            var inBold = odMode === '流入流量' ? 'font-weight:bold;font-size:14px;background:#deebf7;' : '';
-                            var totBold = odMode === '总流量' ? 'font-weight:bold;font-size:14px;background:#f0f0f0;' : '';
-
-                            tooltipHtml += `<span style="color: #E31A1C; display:block; ${outBold}">● 流出: ${v1}</span>` +
-                                `<span style="color: #1F78B4; display:block; ${inBold}">● 流入: ${v2}</span>` +
-                                `<span style="color: #333333; display:block; ${totBold}">● 总流量: ${total}</span>`;
-                        } else if (mode === '驻留人口与变化 (做差)') {
+                        // 【统一的 Tooltip 构建逻辑】
+                        if (analysisMode === '时空环比做差') {
                             var changeStr = v2 > 0 ? `<span style="color:#b2182b;">↑ 增加 ${v2}</span>` : `<span style="color:#2166ac;">↓ 减少 ${Math.abs(v2)}</span>`;
-                            tooltipHtml += `● 选定驻留: ${v1}<br/>● 差值变化: ${changeStr}`;
+                            var metricName = mode === 'OD 轨迹流向' ? `OD (${odMode})` : "网格驻留人口";
+                            tooltipHtml += `● 当前 ${metricName}: ${v1}<br/>● 差值变化: ${changeStr}`;
                         } else {
-                            tooltipHtml += `● 常住人口: ${v1}<br/>● 联通推算: ${v2}`;
+                            if (mode === 'OD 轨迹流向') {
+                                var total = v1 + v2;
+                                var outBold = odMode === '流出流量' ? 'font-weight:bold;background:#fde0dd;' : '';
+                                var inBold = odMode === '流入流量' ? 'font-weight:bold;background:#deebf7;' : '';
+                                var totBold = odMode === '总流量' ? 'font-weight:bold;background:#f0f0f0;' : '';
+                                tooltipHtml += `<span style="color: #E31A1C; display:block; ${outBold}">● 流出: ${v1}</span>` +
+                                    `<span style="color: #1F78B4; display:block; ${inBold}">● 流入: ${v2}</span>` +
+                                    `<span style="color: #333333; display:block; ${totBold}">● 总流量: ${total}</span>`;
+                            } else if (mode === '网格驻留人口') {
+                                tooltipHtml += `● 驻留人口: ${v1}`;
+                            } else {
+                                tooltipHtml += `● 常住人口: ${v1}<br/>● 联通推算: ${v2}`;
+                            }
                         }
                         tooltipHtml += `</div>`;
                         layer.bindTooltip(tooltipHtml);
@@ -135,6 +147,14 @@
 
         // --- 3. 初始化 ECharts ---
         var myChart = echarts.init(document.getElementById('echartsDom'));
+
+        // 【新增】：监听面板的拖拽缩放事件，让图表实时重绘自适应
+        new ResizeObserver(function () {
+            var panel = document.getElementById('chartPanel');
+            if (myChart && panel.style.display !== 'none') {
+                myChart.resize();
+            }
+        }).observe(document.getElementById('chartPanel'));
 
         function renderECharts(chartData) {
             var panel = document.getElementById('chartPanel');

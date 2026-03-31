@@ -109,49 +109,77 @@ namespace GeoVis.Services
         }
 
         /// <summary>
-        /// 终极空间查询：根据模式、日期、小时，返回统一格式的数值字典 (Id -> Val1, Val2)
+        /// 终极空间查询：统一支持 OD 与 驻留 的【绝对值分布】与【时空多基准做差】模型
         /// </summary>
-        public async Task<Dictionary<string, (long Val1, long Val2)>> GetSpatialDataAsync(string mode, int targetDate, int targetHour, string diffMode = "与上一小时做差", int refDate = 0)
+        public async Task<Dictionary<string, (long Val1, long Val2)>> GetSpatialDataAsync(
+            string mode, string analysisMode, string odMetric, int targetDate, int targetHour,
+            string diffMode = "与上一小时做差", List<int> refDates = null)
         {
             return await Task.Run(() =>
             {
                 using var conn = DuckDbFactory.GetConnection();
                 string sql = "";
-
                 string dateStr = DateTime.ParseExact(targetDate.ToString(), "yyyyMMdd", null).ToString("yyyy-MM-dd");
+                bool isDiff = analysisMode == "时空环比做差";
 
-                if (mode == "OD 流出与流入")
+                if (mode == "OD 轨迹流向")
                 {
-                    sql = $@"
-                        SELECT CAST(grid_id AS VARCHAR) AS Id, CAST(SUM(outflow) AS BIGINT) AS Val1, CAST(SUM(inflow) AS BIGINT) AS Val2
-                        FROM (
-                            SELECT o_grid AS grid_id, SUM(trip_cnt) as outflow, 0 as inflow FROM od_data WHERE start_date = {targetDate} AND start_hour = {targetHour} GROUP BY o_grid
-                            UNION ALL
-                            SELECT d_grid AS grid_id, 0 as outflow, SUM(trip_cnt) as inflow FROM od_data WHERE start_date = {targetDate} AND end_hour = {targetHour} GROUP BY d_grid
-                        ) GROUP BY grid_id;
-                    ";
-                }
-                else if (mode == "驻留人口与变化 (做差)")
-                {
-                    // 【修改】：判断是上个小时做差，还是用特定日期做差
-                    if (diffMode == "与选定日期同时间做差" && refDate > 0)
+                    if (!isDiff)
                     {
-                        string refDateStr = DateTime.ParseExact(refDate.ToString(), "yyyyMMdd", null).ToString("yyyy-MM-dd");
+                        // 绝对值老逻辑：Val1=出, Val2=入
                         sql = $@"
-                            WITH current_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour} GROUP BY grid_id),
-                                 prev_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{refDateStr}%' AND hour = {targetHour} GROUP BY grid_id)
-                            SELECT CAST(c.grid_id AS VARCHAR) AS Id, CAST(c.val AS BIGINT) AS Val1, CAST(COALESCE(c.val,0) - COALESCE(p.val,0) AS BIGINT) AS Val2
-                            FROM current_hr c LEFT JOIN prev_hr p ON c.grid_id = p.grid_id;
+                            SELECT CAST(grid_id AS VARCHAR) AS Id, CAST(SUM(outflow) AS BIGINT) AS Val1, CAST(SUM(inflow) AS BIGINT) AS Val2
+                            FROM (
+                                SELECT o_grid AS grid_id, trip_cnt as outflow, 0 as inflow FROM od_data WHERE start_date = {targetDate} AND start_hour = {targetHour}
+                                UNION ALL
+                                SELECT d_grid AS grid_id, 0 as outflow, trip_cnt as inflow FROM od_data WHERE start_date = {targetDate} AND end_hour = {targetHour}
+                            ) GROUP BY grid_id;
                         ";
                     }
                     else
                     {
+                        // 强大的 OD 环比做差：根据前端选定的指标 (总/出/入) 动态选取计算列
+                        string colSelect = odMetric == "流出流量" ? "outflow" : odMetric == "流入流量" ? "inflow" : "total_flow";
+                        string refDateList = refDates != null && refDates.Any() ? string.Join(",", refDates) : targetDate.ToString();
+
+                        // 核心逻辑：当前小时选定指标为 Val1，当前 - 历史(上一小时或多日同小时均值) 为 Val2
                         sql = $@"
-                            WITH current_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour} GROUP BY grid_id),
-                                 prev_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour - 1} GROUP BY grid_id)
-                            SELECT CAST(c.grid_id AS VARCHAR) AS Id, CAST(c.val AS BIGINT) AS Val1, CAST(COALESCE(c.val,0) - COALESCE(p.val,0) AS BIGINT) AS Val2
-                            FROM current_hr c LEFT JOIN prev_hr p ON c.grid_id = p.grid_id;
-                        ";
+                            WITH base_od AS (
+                                SELECT start_date, start_hour as hour, o_grid AS grid_id, trip_cnt as outflow, 0 as inflow, trip_cnt as total_flow FROM od_data WHERE start_date IN ({targetDate},{refDateList}) AND start_hour IN ({targetHour},{targetHour - 1})
+                                UNION ALL
+                                SELECT start_date, end_hour as hour, d_grid AS grid_id, 0 as outflow, trip_cnt as inflow, trip_cnt as total_flow FROM od_data WHERE start_date IN ({targetDate},{refDateList}) AND end_hour IN ({targetHour},{targetHour - 1})
+                            ),
+                            current_hr AS ( SELECT grid_id, SUM({colSelect}) as val FROM base_od WHERE start_date = {targetDate} AND hour = {targetHour} GROUP BY grid_id ),
+                            prev_hr AS ( ";
+
+                        if (diffMode == "与选定日期同时间做差" && refDates != null && refDates.Any())
+                            sql += $"SELECT grid_id, AVG(daily_val) as val FROM (SELECT start_date, grid_id, SUM({colSelect}) as daily_val FROM base_od WHERE start_date IN ({refDateList}) AND hour = {targetHour} GROUP BY start_date, grid_id) GROUP BY grid_id";
+                        else
+                            sql += $"SELECT grid_id, SUM({colSelect}) as val FROM base_od WHERE start_date = {targetDate} AND hour = {targetHour - 1} GROUP BY grid_id";
+
+                        sql += ") SELECT CAST(c.grid_id AS VARCHAR) AS Id, CAST(c.val AS BIGINT) AS Val1, CAST(COALESCE(c.val,0) - COALESCE(p.val,0) AS BIGINT) AS Val2 FROM current_hr c LEFT JOIN prev_hr p ON c.grid_id = p.grid_id;";
+                    }
+                }
+                else if (mode == "网格驻留人口")
+                {
+                    if (!isDiff)
+                    {
+                        // 驻留绝对值：只有 Val1
+                        sql = $"SELECT CAST(grid_id AS VARCHAR) AS Id, CAST(SUM(signal_count) AS BIGINT) AS Val1, 0 AS Val2 FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour} GROUP BY grid_id;";
+                    }
+                    else
+                    {
+                        // 驻留做差
+                        string refDateList = refDates != null && refDates.Any() ? string.Join(",", refDates.Select(d => $"'{DateTime.ParseExact(d.ToString(), "yyyyMMdd", null):yyyy-MM-dd}'")) : $"'{dateStr}'";
+
+                        sql = $@"WITH current_hr AS (SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour} GROUP BY grid_id),
+                                      prev_hr AS ( ";
+                        if (diffMode == "与选定日期同时间做差" && refDates != null && refDates.Any())
+                            sql += $"SELECT grid_id, AVG(daily_val) as val FROM (SELECT date, grid_id, SUM(signal_count) as daily_val FROM mobility_data WHERE CAST(date AS VARCHAR) IN ({refDateList}) AND hour = {targetHour} GROUP BY date, grid_id) GROUP BY grid_id";
+                        else
+                            sql += $"SELECT grid_id, SUM(signal_count) as val FROM mobility_data WHERE CAST(date AS VARCHAR) LIKE '%{dateStr}%' AND hour = {targetHour - 1} GROUP BY grid_id";
+
+                        sql += ") SELECT CAST(c.grid_id AS VARCHAR) AS Id, CAST(c.val AS BIGINT) AS Val1, CAST(COALESCE(c.val,0) - COALESCE(p.val,0) AS BIGINT) AS Val2 FROM current_hr c LEFT JOIN prev_hr p ON c.grid_id = p.grid_id;";
                     }
                 }
                 else if (mode == "月度常住人口")
@@ -163,18 +191,14 @@ namespace GeoVis.Services
                 var dict = new Dictionary<string, (long, long)>();
                 foreach (var row in list)
                 {
-                    // 先用强类型局部变量接住，彻底切断 dynamic 的隐式推断传染
                     string id = Convert.ToString(row.Id);
                     long v1 = Convert.ToInt64(row.Val1);
                     long v2 = Convert.ToInt64(row.Val2);
-
-                    // 用纯强类型变量构建 Tuple，安全入字典
                     dict[id] = (v1, v2);
                 }
                 return dict;
             });
         }
-
         /// <summary>
         /// 【新增】：极速获取选定气象站集合在【指定日期和小时】的降水量
         /// </summary>

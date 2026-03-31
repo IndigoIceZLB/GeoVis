@@ -73,13 +73,22 @@ namespace GeoVis.ViewModels
         // 气象数据类型变更为嵌套字典
         [ObservableProperty] private Dictionary<string, Dictionary<DateTime, double>> _rainfallMultiData;
 
-        [ObservableProperty] private List<string> _mapModes = new() { "OD 流出与流入", "驻留人口与变化 (做差)", "月度常住人口" };
-        [ObservableProperty] private string _selectedMapMode = "OD 流出与流入";
+        [ObservableProperty] private List<string> _mapModes = new() { "OD 轨迹流向", "网格驻留人口", "月度常住人口" };
+        private string _selectedMapMode = "OD 轨迹流向";
+        public string SelectedMapMode
+        {
+            get => _selectedMapMode;
+            set { if (SetProperty(ref _selectedMapMode, value)) _ = UpdateMapByTimeAsync(); }
+        }
 
-        // 【新增】：用于控制Y轴锁定的属性
-        [ObservableProperty] private bool _isYAxisLocked = false;
+        [ObservableProperty] private List<string> _analysisModes = new() { "绝对值分布", "时空环比做差" };
+        private string _selectedAnalysisMode = "绝对值分布";
+        public string SelectedAnalysisMode
+        {
+            get => _selectedAnalysisMode;
+            set { if (SetProperty(ref _selectedAnalysisMode, value)) _ = UpdateMapByTimeAsync(); }
+        }
 
-        // 【新增】：空间分析扩展属性
         [ObservableProperty] private List<string> _odDisplayModes = new() { "总流量", "流出流量", "流入流量" };
         private string _selectedOdDisplayMode = "总流量";
         public string SelectedOdDisplayMode
@@ -87,6 +96,12 @@ namespace GeoVis.ViewModels
             get => _selectedOdDisplayMode;
             set { if (SetProperty(ref _selectedOdDisplayMode, value)) _ = UpdateMapByTimeAsync(); }
         }
+        
+
+        // 【新增】：用于控制Y轴锁定的属性
+        [ObservableProperty] private bool _isYAxisLocked = false;
+
+        
 
         [ObservableProperty] private List<string> _diffModes = new() { "与上一小时做差", "与选定日期同时间做差" };
         private string _selectedDiffMode = "与上一小时做差";
@@ -95,12 +110,9 @@ namespace GeoVis.ViewModels
             get => _selectedDiffMode;
             set { if (SetProperty(ref _selectedDiffMode, value)) _ = UpdateMapByTimeAsync(); }
         }
-        private int _referenceDate;
-        public int ReferenceDate
-        {
-            get => _referenceDate;
-            set { if (SetProperty(ref _referenceDate, value)) _ = UpdateMapByTimeAsync(); }
-        }
+
+        // 【新增】：支持多选的做差基准日期集合
+        [ObservableProperty] private System.Collections.ObjectModel.ObservableCollection<DateSelectionItem> _referenceDates = new();
 
         [ObservableProperty] private System.Collections.ObjectModel.ObservableCollection<StationSelectionItem> _mapStations = new();
         private bool _showMapRainfall = false;
@@ -215,8 +227,17 @@ namespace GeoVis.ViewModels
                     {
                         AvailableDates = dates;
                         SelectedDate = dates.First();
-                    }
 
+                        // 【新增】：在这里填充基准日期的多选列表！
+                        ReferenceDates.Clear();
+                        foreach (var d in dates)
+                        {
+                            var item = new DateSelectionItem { DateValue = d, DisplayDate = d.ToString(), IsSelected = false };
+                            item.OnSelectionChanged = () => _ = UpdateMapByTimeAsync(); // 绑定勾选刷新事件
+                            ReferenceDates.Add(item);
+                        }
+                        if (ReferenceDates.Any()) ReferenceDates.First().IsSelected = true; // 默认勾选第一个
+                    }
                     // 3. 触发一次渲染.注释掉下面这行，避免瞬间触发两次渲染卡死浏览器！
                     //await UpdateMapByTimeAsync();
                 }
@@ -229,14 +250,21 @@ namespace GeoVis.ViewModels
         {
             if (string.IsNullOrEmpty(_baseGeoJson) || SelectedDate == 0) return;
 
-            // 传入新的 DiffMode 和 RefDate
-            var flowDict = await _dataService.GetSpatialDataAsync(SelectedMapMode, SelectedDate, SelectedHour, SelectedDiffMode, ReferenceDate);
+            // 【提取所有打勾的基准日期】
+            var selectedRefDates = ReferenceDates.Where(x => x.IsSelected).Select(x => x.DateValue).ToList();
+
+            /* 传给后台的方法多了几个： SelectedMapMode, SelectedAnalysisMode, SelectedOdDisplayMode,
+            SelectedDate, SelectedHour, SelectedDiffModeselectedRefDates 参数*/
+            var flowDict = await _dataService.GetSpatialDataAsync(
+                SelectedMapMode, SelectedAnalysisMode, SelectedOdDisplayMode,
+                SelectedDate, SelectedHour, SelectedDiffMode, selectedRefDates);
 
             string modifiedJson = await Task.Run(() =>
             {
                 var jNode = JsonNode.Parse(_baseGeoJson);
                 jNode["map_mode"] = SelectedMapMode;
-                jNode["od_display_mode"] = SelectedOdDisplayMode; // 【新增】告诉 JS 我们选了什么指标
+                jNode["od_display_mode"] = SelectedOdDisplayMode;
+                jNode["analysis_mode"] = SelectedAnalysisMode; // 【新增】告诉 JS 我们是在做差还是看绝对值
 
                 foreach (var feature in jNode["features"].AsArray())
                 {
@@ -269,28 +297,18 @@ namespace GeoVis.ViewModels
 
                 OnPropertyChanged(nameof(SelectedChartMode)); // 触发一次画图
 
+
                 // 初始化气象站复选框列表 (剔除关闭和全选选项)
                 if (stations.Any())
                 {
                     MapStations.Clear();
                     foreach (var s in stations.Skip(3)) MapStations.Add(new StationSelectionItem { StationId = s, IsSelected = false });
-                    ReferenceDate = AvailableDates.FirstOrDefault(); // 默认基准日期
+                   
                 }
             }
             catch { }
         }
 
-        // 监听分析模式切换
-        partial void OnSelectedChartModeChanged(string value)
-        {
-            OnPropertyChanged(nameof(NetworkMetricsData)); // 借用这个属性变更来通知 UI 重绘
-        }
-
-        // 监听图层切换，瞬间重绘地图
-        partial void OnSelectedMapModeChanged(string value)
-        {
-            _ = UpdateMapByTimeAsync();
-        }
 
         [RelayCommand]
         private async Task ClearTableAsync(string dataType)
@@ -353,5 +371,20 @@ namespace GeoVis.ViewModels
     {
         [ObservableProperty] private string _stationId;
         [ObservableProperty] private bool _isSelected;
+    }
+
+    public partial class DateSelectionItem : ObservableObject
+    {
+        public int DateValue { get; set; }
+        public string DisplayDate { get; set; }
+
+        private bool _isSelected;
+        public bool IsSelected
+        {
+            get => _isSelected;
+            // 当用户勾选/取消勾选某个日期时，立即触发地图重新做差
+            set { if (SetProperty(ref _isSelected, value)) OnSelectionChanged?.Invoke(); }
+        }
+        public Action OnSelectionChanged { get; set; }
     }
 }
