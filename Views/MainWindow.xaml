@@ -9,6 +9,7 @@
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="{Binding ApplicationTitle}" Height="768" Width="1024"
+        Icon="/Assets/app_icon.ico"
         WindowStartupLocation="CenterScreen"
         Background="#ECEFF1"
         FontFamily="Microsoft YaHei, Segoe UI">
