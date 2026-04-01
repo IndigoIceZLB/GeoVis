@@ -45,21 +45,55 @@ namespace GeoVis.Views
 
         private async void InitializeWebViewAsync()
         {
-            // 等待 WebView2 核心组件初始化完毕
             await MapWebView.EnsureCoreWebView2Async(null);
-
-            // 获取本地 HTML 文件的绝对路径
             string baseDir = System.AppDomain.CurrentDomain.BaseDirectory;
             string htmlPath = Path.Combine(baseDir, "Assets", "web", "map_template.html");
 
             if (File.Exists(htmlPath))
             {
-                // 导航加载本地 HTML 文件
                 MapWebView.CoreWebView2.Navigate(htmlPath);
+
+                // 【新增】：监听 JS 传回来的点击消息
+                MapWebView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
             }
             else
             {
-                MessageBox.Show("找不到地图模板文件，请检查 Assets/web/map_template.html 的生成操作是否设为了‘如果较新则复制’。");
+                MessageBox.Show("找不到地图模板文件...");
+            }
+        }
+
+        // 处理来自 JS 的点击事件
+        private void CoreWebView2_WebMessageReceived(object sender, Microsoft.Web.WebView2.Core.CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            try
+            {
+                // 【核心修复 2】：使用 WebMessageAsJson 属性才能正确接收 JS postMessage 过来的对象！
+                string json = e.WebMessageAsJson;
+
+                var payload = System.Text.Json.JsonDocument.Parse(json).RootElement;
+                if (payload.TryGetProperty("type", out var typeProp))
+                {
+                    string type = typeProp.GetString();
+                    var vm = this.DataContext as MainViewModel;
+                    if (vm == null) return;
+
+                    if (type == "grid_clicked")
+                    {
+                        // 【致命Bug修复】：使用 ToString() 兼容数字类型的 ID，再也不会崩溃了！
+                        string cid = payload.GetProperty("cid").ToString();
+                        vm.SelectedGridIdForFlows = cid; // 触发 ViewModel 重新查询该网格关联的 Top 10
+                    }
+                    else if (type == "map_bg_clicked")
+                    {
+                        // 用户点击了地图空白处，恢复全局 Top 10
+                        vm.SelectedGridIdForFlows = null;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // 打印出错误，防止未来再发生静默异常
+                System.Diagnostics.Debug.WriteLine($"JS 通信解析失败: {ex.Message}");
             }
         }
 

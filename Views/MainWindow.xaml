@@ -116,6 +116,33 @@
                                             </StackPanel.Style>
                                             <TextBlock Text="OD 核心观测指标:" Foreground="#546E7A" Margin="0,0,0,5"/>
                                             <ComboBox ItemsSource="{Binding OdDisplayModes}" SelectedItem="{Binding SelectedOdDisplayMode}" Background="White"/>
+
+                                            <!-- 【新增】：飞线图层的控制开关 -->
+                                            <TextBlock Text="OD 飞线渲染设置:" Foreground="#546E7A" Margin="0,10,0,5"/>
+                                            <CheckBox Content="开启 Top 10 OD 飞线图层" IsChecked="{Binding ShowTopFlows}" Foreground="#9C27B0" FontWeight="Bold" Margin="0,0,0,5"/>
+                                            <CheckBox Content="飞线自动剔除本网格内自流 (O=D)" IsChecked="{Binding ExcludeIntraZonalFlow}" IsEnabled="{Binding ShowTopFlows}" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                            <!-- 【新增】：只在“时空环比做差”且开启了飞线时，才显示红蓝趋势下拉框 -->
+                                            <StackPanel Margin="0,5,0,0">
+                                                <StackPanel.Style>
+                                                    <Style TargetType="StackPanel">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding SelectedAnalysisMode}" Value="时空环比做差"/>
+                                                                    <Condition Binding="{Binding ShowTopFlows}" Value="True"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </MultiDataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </StackPanel.Style>
+                                                <TextBlock Text="做差模式专属 - 飞线过滤:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                                <ComboBox ItemsSource="{Binding TopFlowTrendModes}" SelectedItem="{Binding SelectedTopFlowTrendMode}" Background="#FFF3E0" BorderBrush="#FFB74D"/>
+                                            </StackPanel>
+                                            <TextBlock Text="* 开启飞线后，可在地图上点击特定网格，查看该网格专属的 Top 10 辐射流向；点击空白处恢复全局视野。" 
+                       TextWrapping="Wrap" Foreground="Gray" FontSize="11" FontStyle="Italic" Margin="0,5,0,0"
+                       Visibility="{Binding ShowTopFlows, Converter={StaticResource BoolToVis}}"/>
                                         </StackPanel>
 
                                         <!-- 3. 通用分析模式 -->

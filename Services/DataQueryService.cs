@@ -376,5 +376,103 @@ namespace GeoVis.Services
                 conn.Execute($"DROP TABLE IF EXISTS {tableName};");
             });
         }
+
+        // --- 【第 1 步新增：OD 飞线数据实体】 ---
+        public class OdFlowLine
+        {
+            public string OGrid { get; set; }
+            public string DGrid { get; set; }
+            public long DiffVal { get; set; } // 绝对值模式下为流量，做差模式下为差值
+        }
+
+        /// <summary>
+        /// 获取 Top N 的 OD 流动飞线数据
+        /// </summary>
+        public async Task<List<OdFlowLine>> GetTopOdFlowLinesAsync(
+            string analysisMode, int targetDate, int targetHour,
+            string diffMode = "与上一小时做差", List<int> refDates = null,
+            string filterGridId = null, int topN = 10,
+            bool excludeIntraZonal = false,
+            string odDisplayMode = "总流量",
+            string trendMode = "变化绝对值最大") // 【新增参数】
+        {
+            return await Task.Run(() =>
+            {
+                using var conn = DuckDbFactory.GetConnection();
+                string sql = "";
+                bool isDiff = analysisMode == "时空环比做差";
+
+                string oCol = isDiff ? "OGrid" : "o_grid";
+                string dCol = isDiff ? "DGrid" : "d_grid";
+                string filterClause = "";
+
+                // 1. 全局与局部逻辑：只有点了网格，才应用“流出/流入”指标过滤
+                if (!string.IsNullOrEmpty(filterGridId))
+                {
+                    if (odDisplayMode == "流出流量")
+                        filterClause = $" AND {oCol} = '{filterGridId}' ";
+                    else if (odDisplayMode == "流入流量")
+                        filterClause = $" AND {dCol} = '{filterGridId}' ";
+                    else
+                        filterClause = $" AND ({oCol} = '{filterGridId}' OR {dCol} = '{filterGridId}') ";
+                }
+
+                // 2. 剔除自流
+                if (excludeIntraZonal) filterClause += $" AND {oCol} != {dCol} ";
+
+                // 3. 构建 SQL
+                if (!isDiff)
+                {
+                    // 绝对值模式：不支持增减趋势，永远按流量降序
+                    sql = $@"
+                        SELECT CAST(o_grid AS VARCHAR) AS OGrid, CAST(d_grid AS VARCHAR) AS DGrid, CAST(SUM(trip_cnt) AS BIGINT) AS DiffVal
+                        FROM od_data WHERE start_date = {targetDate} AND start_hour = {targetHour}
+                        {filterClause}
+                        GROUP BY o_grid, d_grid ORDER BY DiffVal DESC LIMIT {topN};
+                    ";
+                }
+                else
+                {
+                    // 【核心升级】：做差模式下的增/减过滤与排序逻辑
+                    string orderClause = "ORDER BY ABS(DiffVal) DESC";
+                    if (trendMode == "仅看激增 (红线)")
+                    {
+                        filterClause += " AND DiffVal > 0 ";
+                        orderClause = "ORDER BY DiffVal DESC"; // 取正数最大
+                    }
+                    else if (trendMode == "仅看锐减 (蓝线)")
+                    {
+                        filterClause += " AND DiffVal < 0 ";
+                        orderClause = "ORDER BY DiffVal ASC";  // 取负数最深（如 -500 排在 -100 前面）
+                    }
+
+                    string refDateList = refDates != null && refDates.Any() ? string.Join(",", refDates) : targetDate.ToString();
+                    sql = $@"
+                        WITH base_od AS (
+                            SELECT start_date, start_hour as hour, o_grid, d_grid, trip_cnt as flow FROM od_data 
+                            WHERE (start_date = {targetDate} AND start_hour IN ({targetHour}, {targetHour - 1}))
+                               OR (start_date IN ({refDateList}) AND start_hour = {targetHour})
+                        ),
+                        current_hr AS ( SELECT o_grid, d_grid, SUM(flow) as val FROM base_od WHERE start_date = {targetDate} AND hour = {targetHour} GROUP BY o_grid, d_grid ),
+                        prev_hr AS ( ";
+
+                    if (diffMode == "与选定日期同时间做差" && refDates != null && refDates.Any())
+                        sql += $"SELECT o_grid, d_grid, AVG(daily_val) as val FROM (SELECT start_date, o_grid, d_grid, SUM(flow) as daily_val FROM base_od WHERE start_date IN ({refDateList}) AND hour = {targetHour} GROUP BY start_date, o_grid, d_grid) GROUP BY o_grid, d_grid";
+                    else
+                        sql += $"SELECT o_grid, d_grid, SUM(flow) as val FROM base_od WHERE start_date = {targetDate} AND hour = {targetHour - 1} GROUP BY o_grid, d_grid";
+
+                    sql += $@"
+                        ),
+                        joined_diff AS (
+                            SELECT COALESCE(c.o_grid, p.o_grid) AS OGrid, COALESCE(c.d_grid, p.d_grid) AS DGrid, (COALESCE(c.val, 0) - COALESCE(p.val, 0)) AS DiffVal
+                            FROM current_hr c FULL OUTER JOIN prev_hr p ON c.o_grid = p.o_grid AND c.d_grid = p.d_grid
+                        )
+                        SELECT CAST(OGrid AS VARCHAR) AS OGrid, CAST(DGrid AS VARCHAR) AS DGrid, CAST(DiffVal AS BIGINT) AS DiffVal
+                        FROM joined_diff WHERE 1=1 {filterClause} {orderClause} LIMIT {topN};
+                    ";
+                }
+                return conn.Query<OdFlowLine>(sql).ToList();
+            });
+        }
     }
 }

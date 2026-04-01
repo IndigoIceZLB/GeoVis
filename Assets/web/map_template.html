@@ -69,6 +69,11 @@
         var map = L.map('map').setView([23.1291, 113.2644], 11);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
 
+        // 【新增】：点击地图空白处，告诉 C# 恢复全局飞线
+        map.on('click', function (e) {
+            window.chrome.webview.postMessage({ type: 'map_bg_clicked' });
+        });
+
         function getColor(d) {
             return d > 20000 ? '#800026' : d > 10000 ? '#BD0026' : d > 5000 ? '#E31A1C' :
                 d > 2000 ? '#FC4E2A' : d > 500 ? '#FD8D3C' : d > 100 ? '#FEB24C' : '#FFEDA0';
@@ -81,14 +86,22 @@
         }
 
         var geoJsonLayer;
+        // 【新增】：创建一个独立的飞线图层组
+        var flowLayerGroup = L.layerGroup().addTo(map);
 
         // --- 2. 渲染网格核心函数 ---
         function renderGeoData(dataObj) {
             try {
+                // 清空旧的网格和旧的飞线
                 if (geoJsonLayer) map.removeLayer(geoJsonLayer);
+                flowLayerGroup.clearLayers();
+
                 var mode = dataObj.map_mode; // 'OD 轨迹流向', '网格驻留人口', '月度常住人口'
                 var odMode = dataObj.od_display_mode; // '总流量', '流出流量', '流入流量'
                 var analysisMode = dataObj.analysis_mode; // '绝对值分布', '时空环比做差'
+
+                // 【新增】：用于存储所有网格中心点的字典 (Key: 网格ID, Value: [Lat, Lng])
+                var gridCenters = {};
 
                 geoJsonLayer = L.geoJSON(dataObj, {
                     style: function (feature) {
@@ -96,12 +109,10 @@
                         var v2 = feature.properties.val2 || 0;
                         var fillCol = "transparent";
 
-                        // 【核心渲染逻辑解耦】
                         if (analysisMode === '时空环比做差') {
-                            fillCol = getDiffColor(v2); // 做差模式下，后端统一将差值塞在 v2 里
+                            fillCol = getDiffColor(v2);
                         } else {
                             if (mode === 'OD 轨迹流向') {
-                                // 绝对值模式下，OD 依然保持原来的 v1(出), v2(入) 结构
                                 var renderVal = v1;
                                 if (odMode === '流入流量') renderVal = v2;
                                 if (odMode === '总流量') renderVal = v1 + v2;
@@ -116,9 +127,14 @@
                         var v1 = feature.properties.val1 || 0;
                         var v2 = feature.properties.val2 || 0;
                         var cid = feature.properties.cid || "未知";
+
+                        // 【新增】：在画底图时，提取当前网格的几何中心点，存入字典！
+                        if (cid !== "未知") {
+                            gridCenters[cid] = layer.getBounds().getCenter();
+                        }
+
                         var tooltipHtml = `<div style="font-family: Arial; font-size: 13px;"><b>网格 ID:</b> ${cid}<br/>`;
 
-                        // 【统一的 Tooltip 构建逻辑】
                         if (analysisMode === '时空环比做差') {
                             var changeStr = v2 > 0 ? `<span style="color:#b2182b;">↑ 增加 ${v2}</span>` : `<span style="color:#2166ac;">↓ 减少 ${Math.abs(v2)}</span>`;
                             var metricName = mode === 'OD 轨迹流向' ? `OD (${odMode})` : "网格驻留人口";
@@ -140,8 +156,65 @@
                         }
                         tooltipHtml += `</div>`;
                         layer.bindTooltip(tooltipHtml);
+
+                        // 【新增】：点击网格时，拦截事件并把网格 ID 发给 C#
+                        layer.on('click', function (e) {
+                            L.DomEvent.stopPropagation(e); // 阻止事件冒泡到地图背景
+                            window.chrome.webview.postMessage({ type: 'grid_clicked', cid: cid });
+                        });
                     }
                 }).addTo(map);
+
+                // ====== 【新增核心逻辑：绘制 Top 10 飞线】 ======
+                if (dataObj.top_flows && dataObj.top_flows.length > 0) {
+                    var flows = dataObj.top_flows;
+
+                    // 找出这 10 条线里面的最大绝对值，用于计算线条粗细比例
+                    var maxAbsVal = Math.max(...flows.map(f => Math.abs(f.diff_val))) || 1;
+
+                    flows.forEach(f => {
+                        var startPt = gridCenters[f.o_grid];
+                        var endPt = gridCenters[f.d_grid];
+
+                        // 只有当起点和终点都在当前屏幕可视的 GeoJSON 网格中时才画线
+                        if (startPt && endPt) {
+                            var val = f.diff_val;
+                            var absVal = Math.abs(val);
+
+                            // 动态计算粗细：在 2 到 8 像素之间线性映射
+                            var weight = 2 + (absVal / maxAbsVal) * 6;
+
+                            // 颜色映射：做差模式增红减蓝；绝对值模式统一紫色
+                            var lineColor = "#9C27B0";
+                            if (analysisMode === '时空环比做差') {
+                                lineColor = val > 0 ? "#b2182b" : "#2166ac";
+                            }
+
+                            // 画一条带透明度的虚线，极具科技感且不遮挡底色
+                            var line = L.polyline([startPt, endPt], {
+                                color: lineColor,
+                                weight: weight,
+                                opacity: 0.85,
+                                dashArray: '6, 8' // 虚线样式
+                            });
+
+                            // 给飞线绑定悬停 Tooltip
+                            var flowTypeStr = analysisMode === '时空环比做差' ? '差异变化量' : '总流量';
+                            line.bindTooltip(`
+                                <div style="font-family: Arial; font-size: 13px;">
+                                    <b>🚀 Top 10 OD 飞线</b><br/>
+                                    ● 起点: ${f.o_grid}<br/>
+                                    ● 终点: ${f.d_grid}<br/>
+                                    ● ${flowTypeStr}: <b style="color:${lineColor}">${val}</b>
+                                </div>
+                            `, { sticky: true }); // sticky 使弹窗跟随鼠标移动
+
+                            flowLayerGroup.addLayer(line);
+                        }
+                    });
+                }
+                // ===================================================
+
             } catch (e) { console.error(e); }
         }
 

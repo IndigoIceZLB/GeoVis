@@ -101,7 +101,46 @@ namespace GeoVis.ViewModels
         // 【新增】：用于控制Y轴锁定的属性
         [ObservableProperty] private bool _isYAxisLocked = false;
 
-        
+        // 【新增】：是否开启 Top 10 飞线渲染
+        private bool _showTopFlows = false;
+        public bool ShowTopFlows
+        {
+            get => _showTopFlows;
+            set { if (SetProperty(ref _showTopFlows, value)) _ = UpdateMapByTimeAsync(); }
+        }
+
+        // 【新增】：是否剔除自流（O=D 的格网内流动）
+        private bool _excludeIntraZonalFlow = true;
+        public bool ExcludeIntraZonalFlow
+        {
+            get => _excludeIntraZonalFlow;
+            set { if (SetProperty(ref _excludeIntraZonalFlow, value)) _ = UpdateMapByTimeAsync(); }
+        }
+
+        // 【新增】：用于控制飞线的增减趋势显示
+        [ObservableProperty]
+        private List<string> _topFlowTrendModes = new() { "变化绝对值最大", "仅看激增 (红线)", "仅看锐减 (蓝线)" };
+
+        private string _selectedTopFlowTrendMode = "变化绝对值最大";
+        public string SelectedTopFlowTrendMode
+        {
+            get => _selectedTopFlowTrendMode;
+            set { if (SetProperty(ref _selectedTopFlowTrendMode, value)) _ = UpdateMapByTimeAsync(); }
+        }
+
+        // 【完全掌控生命周期的显式属性】
+        private string _selectedGridIdForFlows = null;
+        public string SelectedGridIdForFlows
+        {
+            get => _selectedGridIdForFlows;
+            set
+            {
+                if (SetProperty(ref _selectedGridIdForFlows, value))
+                {
+                    _ = UpdateMapByTimeAsync(); // 只要被赋值，强制去查最新飞线并刷地图！
+                }
+            }
+        }
 
         [ObservableProperty] private List<string> _diffModes = new() { "与上一小时做差", "与选定日期同时间做差" };
         private string _selectedDiffMode = "与上一小时做差";
@@ -253,19 +292,47 @@ namespace GeoVis.ViewModels
             // 【提取所有打勾的基准日期】
             var selectedRefDates = ReferenceDates.Where(x => x.IsSelected).Select(x => x.DateValue).ToList();
 
-            /* 传给后台的方法多了几个： SelectedMapMode, SelectedAnalysisMode, SelectedOdDisplayMode,
-            SelectedDate, SelectedHour, SelectedDiffModeselectedRefDates 参数*/
+            // 1. 获取网格颜色的底层数据
             var flowDict = await _dataService.GetSpatialDataAsync(
                 SelectedMapMode, SelectedAnalysisMode, SelectedOdDisplayMode,
                 SelectedDate, SelectedHour, SelectedDiffMode, selectedRefDates);
+
+            // ====== 【第 2 步新增：获取 Top 10 飞线数据】 ======
+            List<DataQueryService.OdFlowLine> topFlows = new();
+            if (SelectedMapMode == "OD 轨迹流向" && ShowTopFlows)
+            {
+                topFlows = await _dataService.GetTopOdFlowLinesAsync(
+                    SelectedAnalysisMode, SelectedDate, SelectedHour,
+                    SelectedDiffMode, selectedRefDates,
+                    SelectedGridIdForFlows, 10, ExcludeIntraZonalFlow,
+                    SelectedOdDisplayMode,
+                    SelectedTopFlowTrendMode); // 【新增】：把趋势模式传给底层
+            }
+            // ====================================================
 
             string modifiedJson = await Task.Run(() =>
             {
                 var jNode = JsonNode.Parse(_baseGeoJson);
                 jNode["map_mode"] = SelectedMapMode;
                 jNode["od_display_mode"] = SelectedOdDisplayMode;
-                jNode["analysis_mode"] = SelectedAnalysisMode; // 【新增】告诉 JS 我们是在做差还是看绝对值
+                jNode["analysis_mode"] = SelectedAnalysisMode;
 
+                // ====== 【第 2 步新增：把飞线数组塞进 JSON 根节点】 ======
+                var flowsArray = new System.Text.Json.Nodes.JsonArray();
+                foreach (var f in topFlows)
+                {
+                    var fNode = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["o_grid"] = f.OGrid,
+                        ["d_grid"] = f.DGrid,
+                        ["diff_val"] = f.DiffVal
+                    };
+                    flowsArray.Add(fNode);
+                }
+                jNode["top_flows"] = flowsArray;
+                // ==========================================================
+
+                // 遍历每一个多边形网格，赋颜色和数值（你原有的逻辑保持不变）
                 foreach (var feature in jNode["features"].AsArray())
                 {
                     var props = feature["properties"];
@@ -307,8 +374,7 @@ namespace GeoVis.ViewModels
                 }
             }
             catch { }
-        }
-
+        }  
 
         [RelayCommand]
         private async Task ClearTableAsync(string dataType)
@@ -387,4 +453,6 @@ namespace GeoVis.ViewModels
         }
         public Action OnSelectionChanged { get; set; }
     }
+
+
 }
