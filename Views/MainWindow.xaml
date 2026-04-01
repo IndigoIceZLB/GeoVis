@@ -39,182 +39,189 @@
                 <TextBlock Grid.Row="0" Text="数据操作区" FontSize="18" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,16"/>
 
                 <!-- 预留的导入按钮 -->
-                <StackPanel Grid.Row="1">
-                    <TextBlock Text="1. 数据建库 (CSV入表)" Foreground="#546E7A" Margin="0,0,0,5"/>
+                <!-- 【修改】：包裹 ScrollViewer 允许小屏幕下滚动，不再卡死 -->
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,5,0">
+                    <StackPanel>
 
-                    <!-- OD 数据行 -->
-                    <Grid Margin="0,2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="50"/>
-                        </Grid.ColumnDefinitions>
-                        <Button Content="入库: OD 流向长表" Command="{Binding ImportMultiDataCommand}" CommandParameter="OD" Style="{StaticResource AcademicButtonStyle}"/>
-                        <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="OD" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
-                    </Grid>
+                        <!-- 模块 1：数据建库 (默认 IsExpanded="False" 折叠起来省空间) -->
+                        <Expander Header="1. 数据建库 (CSV入表)" IsExpanded="False" Foreground="#546E7A" FontWeight="Bold" Margin="0,0,0,10">
+                            <StackPanel Margin="0,10,0,0">
+                                <!-- OD 数据行 -->
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="入库: OD 流向长表" Command="{Binding ImportMultiDataCommand}" CommandParameter="OD" Style="{StaticResource AcademicButtonStyle}"/>
+                                    <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="OD" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
+                                </Grid>
 
-                    <!-- 降水数据行 -->
-                    <Grid Margin="0,2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="50"/>
-                        </Grid.ColumnDefinitions>
-                        <Button Content="入库: 小时降水极简表" Command="{Binding ImportMultiDataCommand}" CommandParameter="Rainfall" Style="{StaticResource AcademicButtonStyle}"/>
-                        <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Rainfall" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
-                    </Grid>
+                                <!-- 降水数据行 -->
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="入库: 小时降水极简表" Command="{Binding ImportMultiDataCommand}" CommandParameter="Rainfall" Style="{StaticResource AcademicButtonStyle}"/>
+                                    <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Rainfall" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
+                                </Grid>
 
-                    <!-- 驻留数据行 -->
-                    <Grid Margin="0,2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="50"/>
-                        </Grid.ColumnDefinitions>
-                        <Button Content="入库: 驻留信号密度表" Command="{Binding ImportMultiDataCommand}" CommandParameter="Mobility" Style="{StaticResource AcademicButtonStyle}"/>
-                        <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Mobility" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
-                    </Grid>
+                                <!-- 驻留数据行 -->
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="入库: 驻留信号密度表" Command="{Binding ImportMultiDataCommand}" CommandParameter="Mobility" Style="{StaticResource AcademicButtonStyle}"/>
+                                    <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Mobility" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
+                                </Grid>
 
-                    <!-- 人口数据行 -->
-                    <Grid Margin="0,2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="50"/>
-                        </Grid.ColumnDefinitions>
-                        <Button Content="入库: 月度常住人口表" Command="{Binding ImportMultiDataCommand}" CommandParameter="Population" Style="{StaticResource AcademicButtonStyle}"/>
-                        <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Population" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
-                    </Grid>
-
-                    <TextBlock Text="2. 空间底图交互" Foreground="#546E7A" Margin="0,15,0,5"/>
-                    <Button Content="加载网格(GeoJSON)渲染" Command="{Binding LoadAndRenderMapCommand}" Margin="0,2" Style="{StaticResource AcademicButtonStyle}"/>
-                    <!-- 新增时间切片控制台 -->
-                    <Border Background="#F5F7FA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,15,0,0">
-                        <StackPanel>
-                            <TextBlock Text="空间时间切片控制" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,10"/>
-
-                            <!-- 1. 基础图层 -->
-                            <TextBlock Text="空间渲染图层:" Foreground="#546E7A" Margin="0,0,0,5"/>
-                            <ComboBox ItemsSource="{Binding MapModes}" SelectedItem="{Binding SelectedMapMode}" Margin="0,0,0,10" Background="White"/>
-
-                            <!-- 2. OD专属：渲染指标 (选OD时才出现) -->
-                            <StackPanel Margin="0,0,0,10">
-                                <StackPanel.Style>
-                                    <Style TargetType="StackPanel">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="OD 轨迹流向">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </StackPanel.Style>
-                                <TextBlock Text="OD 核心观测指标:" Foreground="#546E7A" Margin="0,0,0,5"/>
-                                <ComboBox ItemsSource="{Binding OdDisplayModes}" SelectedItem="{Binding SelectedOdDisplayMode}" Background="White"/>
+                                <!-- 人口数据行 -->
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="入库: 月度常住人口表" Command="{Binding ImportMultiDataCommand}" CommandParameter="Population" Style="{StaticResource AcademicButtonStyle}"/>
+                                    <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Population" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
+                                </Grid>
                             </StackPanel>
+                        </Expander>
 
-                            <!-- 3. 通用：数据分析模式 (除了常住人口不显示) -->
-                            <StackPanel Margin="0,0,0,10">
-                                <StackPanel.Style>
-                                    <Style TargetType="StackPanel">
-                                        <Setter Property="Visibility" Value="Visible"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </StackPanel.Style>
-                                <TextBlock Text="空间数据分析模式:" Foreground="#546E7A" Margin="0,0,0,5" FontWeight="Bold"/>
-                                <ComboBox ItemsSource="{Binding AnalysisModes}" SelectedItem="{Binding SelectedAnalysisMode}" Background="#E3F2FD" BorderBrush="#90CAF9" FontWeight="Bold"/>
-                            </StackPanel>
+                        <!-- 模块 2：空间底图交互 (默认 IsExpanded="True" 展开) -->
+                        <Expander Header="2. 空间底图交互" IsExpanded="True" Foreground="#546E7A" FontWeight="Bold">
+                            <StackPanel Margin="0,10,0,0">
+                                <Button Content="加载网格(GeoJSON)渲染" Command="{Binding LoadAndRenderMapCommand}" Margin="0,2" Style="{StaticResource AcademicButtonStyle}"/>
 
-                            <!-- 4. 做差专属：做差对比基准 (只有选了做差模式才显示) -->
-                            <StackPanel Margin="0,0,0,10">
-                                <StackPanel.Style>
-                                    <Style TargetType="StackPanel">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding SelectedAnalysisMode}" Value="时空环比做差">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </StackPanel.Style>
-                                <TextBlock Text="差值计算参考基准:" Foreground="#546E7A" Margin="0,0,0,5"/>
-                                <ComboBox ItemsSource="{Binding DiffModes}" SelectedItem="{Binding SelectedDiffMode}" Background="White" Margin="0,0,0,5"/>
-                                <!-- 日期多选框 -->
-                                <ListBox ItemsSource="{Binding ReferenceDates}" Height="85" Background="#FFF3E0" BorderBrush="#FFCC80">
-                                    <ListBox.Style>
-                                        <Style TargetType="ListBox">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding SelectedDiffMode}" Value="与选定日期同时间做差">
+                                <!-- 时间切片控制台 (原封不动放进来) -->
+                                <Border Background="#F5F7FA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,10,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="空间时间切片控制" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,10"/>
+
+                                        <!-- 1. 基础图层 -->
+                                        <TextBlock Text="空间渲染图层:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                        <ComboBox ItemsSource="{Binding MapModes}" SelectedItem="{Binding SelectedMapMode}" Margin="0,0,0,10" Background="White"/>
+
+                                        <!-- 2. OD专属 -->
+                                        <StackPanel Margin="0,0,0,10">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding SelectedMapMode}" Value="OD 轨迹流向">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <TextBlock Text="OD 核心观测指标:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                            <ComboBox ItemsSource="{Binding OdDisplayModes}" SelectedItem="{Binding SelectedOdDisplayMode}" Background="White"/>
+                                        </StackPanel>
+
+                                        <!-- 3. 通用分析模式 -->
+                                        <StackPanel Margin="0,0,0,10">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
                                                     <Setter Property="Visibility" Value="Visible"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </ListBox.Style>
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <CheckBox Content="{Binding DisplayDate}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"/>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <TextBlock Text="空间数据分析模式:" Foreground="#546E7A" Margin="0,0,0,5" FontWeight="Bold"/>
+                                            <ComboBox ItemsSource="{Binding AnalysisModes}" SelectedItem="{Binding SelectedAnalysisMode}" Background="#E3F2FD" BorderBrush="#90CAF9" FontWeight="Bold"/>
+                                        </StackPanel>
+
+                                        <!-- 4. 做差对比基准 -->
+                                        <StackPanel Margin="0,0,0,10">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding SelectedAnalysisMode}" Value="时空环比做差">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <TextBlock Text="差值计算参考基准:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                            <ComboBox ItemsSource="{Binding DiffModes}" SelectedItem="{Binding SelectedDiffMode}" Background="White" Margin="0,0,0,5"/>
+                                            <!-- 日期多选框 -->
+                                            <ListBox ItemsSource="{Binding ReferenceDates}" Height="85" Background="#FFF3E0" BorderBrush="#FFCC80">
+                                                <ListBox.Style>
+                                                    <Style TargetType="ListBox">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding SelectedDiffMode}" Value="与选定日期同时间做差">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ListBox.Style>
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox Content="{Binding DisplayDate}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"/>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </StackPanel>
+
+                                        <!-- 5. 悬浮窗控制 -->
+                                        <StackPanel Margin="0,10,0,10">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <TextBlock Text="地图微观气象观测:" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,5"/>
+                                            <CheckBox Content="右下角开启当小时降水柱状图" IsChecked="{Binding ShowMapRainfall}" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,0,5"/>
+
+                                            <StackPanel Visibility="{Binding ShowMapRainfall, Converter={StaticResource BoolToVis}}">
+                                                <CheckBox Content="✅ 一键全选气象站" IsChecked="{Binding IsAllStationsSelected}" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,0,5"/>
+                                                <ListBox ItemsSource="{Binding MapStations}" Height="120" BorderBrush="#E0E0E0" Background="White">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <CheckBox Content="{Binding StationId}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" 
+                                                                      Command="{Binding DataContext.UpdateMapRainfallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <!-- 日期与滑块 -->
+                                        <TextBlock Text="选择日期:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                        <ComboBox ItemsSource="{Binding AvailableDates}" 
+                                                  SelectedItem="{Binding SelectedDate}" 
+                                                  Margin="0,0,0,15" Background="White" Padding="5"/>
+
+                                        <TextBlock Text="{Binding SelectedHour, StringFormat='选择小时: {0:D2}:00'}" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                        <Slider Minimum="0" Maximum="23" 
+                                                Value="{Binding SelectedHour}" 
+                                                TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,0,0,5"/>
+
+                                        <Grid>
+                                            <TextBlock Text="0" HorizontalAlignment="Left" FontSize="10" Foreground="Gray"/>
+                                            <TextBlock Text="12" HorizontalAlignment="Center" FontSize="10" Foreground="Gray"/>
+                                            <TextBlock Text="23" HorizontalAlignment="Right" FontSize="10" Foreground="Gray"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
+                        </Expander>
 
-                            <!-- 3. 地图降水悬浮窗控制 -->
-                            <StackPanel Margin="0,10,0,10">
-                                <StackPanel.Style>
-                                    <Style TargetType="StackPanel">
-                                        <Setter Property="Visibility" Value="Visible"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding SelectedMapMode}" Value="月度常住人口">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </StackPanel.Style>
-                                <TextBlock Text="地图微观气象观测:" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,5"/>
-                                <CheckBox Content="右下角开启当小时降水柱状图" IsChecked="{Binding ShowMapRainfall}" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,0,5"/>
-
-                                <StackPanel Visibility="{Binding ShowMapRainfall, Converter={StaticResource BoolToVis}}">
-                                    <!-- 【新增】一键全选复选框 -->
-                                    <CheckBox Content="✅ 一键全选气象站" IsChecked="{Binding IsAllStationsSelected}" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,0,5"/>
-                                    <ListBox ItemsSource="{Binding MapStations}" Height="120" BorderBrush="#E0E0E0" Background="White">
-                                        <ListBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <!-- 【重点修复】：增加 UpdateSourceTrigger=PropertyChanged 确保立即响应 -->
-                                                <CheckBox Content="{Binding StationId}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" 
-                                                          Command="{Binding DataContext.UpdateMapRainfallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
-                                            </DataTemplate>
-                                        </ListBox.ItemTemplate>
-                                    </ListBox>
-                                </StackPanel>
-                            </StackPanel>
-                            <!-- 日期选择下拉框 -->
-                            <TextBlock Text="选择日期:" Foreground="#546E7A" Margin="0,0,0,5"/>
-                            <ComboBox ItemsSource="{Binding AvailableDates}" 
-                                      SelectedItem="{Binding SelectedDate}" 
-                                      Margin="0,0,0,15"
-                                      Background="White" Padding="5"/>
-
-                            <!-- 小时滑块 -->
-                            <TextBlock Text="{Binding SelectedHour, StringFormat='选择小时: {0:D2}:00'}" Foreground="#546E7A" Margin="0,0,0,5"/>
-                            <Slider Minimum="0" Maximum="23" 
-                                    Value="{Binding SelectedHour}" 
-                                    TickFrequency="1" IsSnapToTickEnabled="True"
-                                    Margin="0,0,0,5"/>
-
-                            <!-- 刻度线说明 -->
-                            <Grid>
-                                <TextBlock Text="0" HorizontalAlignment="Left" FontSize="10" Foreground="Gray"/>
-                                <TextBlock Text="12" HorizontalAlignment="Center" FontSize="10" Foreground="Gray"/>
-                                <TextBlock Text="23" HorizontalAlignment="Right" FontSize="10" Foreground="Gray"/>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-                    
-                </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
 
                 <!-- 状态栏 -->
                 <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" Foreground="#78909C" FontSize="12"/>

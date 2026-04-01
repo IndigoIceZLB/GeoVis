@@ -67,11 +67,14 @@ namespace GeoVis.Views
         {
             var vm = (MainViewModel)sender;
 
-            if (e.PropertyName == nameof(MainViewModel.NetworkMetricsData))
+            // 【修改】：当网络指标数据 OR 驻留指标数据 OR 选中的图表模式 发生变化时，都触发图表重绘
+            if (e.PropertyName == nameof(MainViewModel.NetworkMetricsData) ||
+                e.PropertyName == nameof(MainViewModel.MobilityMetricsData) ||
+                e.PropertyName == nameof(MainViewModel.SelectedChartMode))
             {
                 RenderAcademicChart(vm);
             }
-            // 【新增】：监听锁定状态的切换
+            // 监听锁定状态的切换
             else if (e.PropertyName == nameof(MainViewModel.IsYAxisLocked))
             {
                 MainChart.Plot.Axes.Rules.Clear(); // 每次切换先清空规则
@@ -89,6 +92,15 @@ namespace GeoVis.Views
 
         private void RenderAcademicChart(MainViewModel vm)
         {
+            // ====== 【新增代码：步骤 1】记录重绘前的 X 轴视野 ======
+            bool hasOldLimits = MainChart.Plot.GetPlottables().Any(); // 判断画布上之前有没有图
+            double oldXMin = 0, oldXMax = 0;
+            if (hasOldLimits)
+            {
+                oldXMin = MainChart.Plot.Axes.Bottom.Min;
+                oldXMax = MainChart.Plot.Axes.Bottom.Max;
+            }
+
             MainChart.Reset(); // 彻底清理旧画布
             MainChart.Plot.Axes.Rules.Clear(); // 画新图时必须清空约束规则，否则会导致无法自动缩放！
 
@@ -208,7 +220,18 @@ namespace GeoVis.Views
             legend.Orientation = Orientation.Horizontal;
             legend.FontName = "Microsoft YaHei"; // 保险起见保留字体设置
 
-            MainChart.Plot.Axes.SetLimitsX(xs[0], xs[Math.Min(72, dataCount - 1)]);
+            // ====== 【修改代码：步骤 2】恢复重绘前的 X 轴视野 ======
+            if (hasOldLimits && !double.IsNaN(oldXMin) && !double.IsNaN(oldXMax) && oldXMin != oldXMax)
+            {
+                // 如果之前有视野记录，无缝恢复到之前的拖拽位置！
+                MainChart.Plot.Axes.SetLimitsX(oldXMin, oldXMax);
+            }
+            else
+            {
+                // 如果是软件刚打开第一次画图，默认显示前 72 小时的跨度
+                MainChart.Plot.Axes.SetLimitsX(xs[0], xs[Math.Min(72, dataCount - 1)]);
+            }
+
 
             // 【新增逻辑】：在完成了最佳比例缩放后，如果此时系统处于"锁定"状态，自动把 Y 轴焊死！
             if (vm.IsYAxisLocked)
