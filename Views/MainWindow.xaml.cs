@@ -104,7 +104,8 @@ namespace GeoVis.Views
             // 【修改】：当网络指标数据 OR 驻留指标数据 OR 选中的图表模式 发生变化时，都触发图表重绘
             if (e.PropertyName == nameof(MainViewModel.NetworkMetricsData) ||
                 e.PropertyName == nameof(MainViewModel.MobilityMetricsData) ||
-                e.PropertyName == nameof(MainViewModel.SelectedChartMode))
+                e.PropertyName == nameof(MainViewModel.SelectedChartMode) ||
+                    e.PropertyName == nameof(MainViewModel.TemperatureMultiData)) // 【增加气温触发器】
             {
                 RenderAcademicChart(vm);
             }
@@ -241,12 +242,105 @@ namespace GeoVis.Views
                     sigRain.Axes.YAxis = yAxisRain;
                     colorIdx++;
                 }
-
+               
                 // 【修复2：上移柱状图】：乘数由 4 改为 8，使柱状图纵向大幅收缩，紧贴图表顶部
                 MainChart.Plot.Axes.SetLimitsY(-globalMaxRain * 8, 0, yAxisRain);
             }
 
-            // --- 5. 画布刷新与乱码修复 ---
+            // --- 5. 全新科学升级：气温包络带与曲线 (完全独立) ---
+            if (vm.SelectedTempStation != null && !vm.SelectedTempStation.Contains("NONE") &&
+                vm.TemperatureMultiData != null && vm.TemperatureMultiData.Any())
+            {
+                var yAxisTemp = MainChart.Plot.Axes.AddRightAxis();
+                yAxisTemp.Label.Text = "Temperature (°C)";
+                yAxisTemp.Label.ForeColor = Color.FromHex("#E65100"); // 学术深橙色
+
+                // 情况 A：全叠加模式 -> 渲染【平均线 + Min-Max 包络阴影区】
+                if (vm.SelectedTempStation == "ALL STATIONS (Overlay 全叠加)")
+                {
+                    // DuckDB 已经帮我们算好了 Min, Max, Avg 三个虚拟站点
+                    var dict = vm.TemperatureMultiData;
+                    if (dict.ContainsKey("Min") && dict.ContainsKey("Max") && dict.ContainsKey("Avg"))
+                    {
+                        var minDict = dict["Min"];
+                        var maxDict = dict["Max"];
+                        var avgDict = dict["Avg"];
+
+                        List<double> validXs = new();
+                        List<double> validMins = new();
+                        List<double> validMaxs = new();
+                        List<double> validAvgs = new();
+
+                        for (int i = 0; i < dataCount; i++)
+                        {
+                            DateTime currentDt = DateTime.FromOADate(xs[i]);
+                            // 必须三个值同时存在才绘制，确保包络带连续
+                            if (minDict.ContainsKey(currentDt) && maxDict.ContainsKey(currentDt) && avgDict.ContainsKey(currentDt))
+                            {
+                                validXs.Add(xs[i]);
+                                validMins.Add(minDict[currentDt]);
+                                validMaxs.Add(maxDict[currentDt]);
+                                validAvgs.Add(avgDict[currentDt]);
+                            }
+                        }
+
+                        if (validXs.Any())
+                        {
+                            // 1. 画阴影包络带 (Fill) - 使用原生强类型RGBA确保透明度生效
+                            var band = MainChart.Plot.Add.FillY(validXs.ToArray(), validMins.ToArray(), validMaxs.ToArray());
+                            // R=255, G=143, B=0 (深橙色), Alpha=60 (约25%透明度)
+                            band.FillColor = new ScottPlot.Color(255, 143, 0, 60);
+                            band.LineWidth = 0;
+                            band.Label = "Temp Range (Min-Max)";
+                            band.Axes.YAxis = yAxisTemp;
+
+                            // 2. 画平均气温主线
+                            var lineAvg = MainChart.Plot.Add.ScatterLine(validXs.ToArray(), validAvgs.ToArray());
+                            lineAvg.Color = new ScottPlot.Color(230, 81, 0); // 更深的橙色 #E65100
+                            lineAvg.LineWidth = 2.5f;
+                            lineAvg.Label = "City Avg Temp";
+                            lineAvg.Axes.YAxis = yAxisTemp;
+                        }
+                    }
+                }
+                // 情况 B：单站点或简单平均模式 -> 渲染常规单线
+                else
+                {
+                    string[] tempPalette = { "#FF8F00", "#FF5252", "#E040FB", "#00B0FF" };
+                    int tColorIdx = 0;
+
+                    foreach (var kvp in vm.TemperatureMultiData)
+                    {
+                        string stationId = kvp.Key;
+                        var tempDict = kvp.Value;
+
+                        List<double> validXs = new();
+                        List<double> validYs = new();
+
+                        for (int i = 0; i < dataCount; i++)
+                        {
+                            DateTime currentDt = DateTime.FromOADate(xs[i]);
+                            if (tempDict.TryGetValue(currentDt, out double tVal))
+                            {
+                                validXs.Add(xs[i]);
+                                validYs.Add(tVal);
+                            }
+                        }
+
+                        if (validXs.Any())
+                        {
+                            var sigTemp = MainChart.Plot.Add.ScatterLine(validXs.ToArray(), validYs.ToArray());
+                            sigTemp.Color = Color.FromHex(tempPalette[tColorIdx % tempPalette.Length]);
+                            sigTemp.LineWidth = 2.0f;
+                            sigTemp.Label = stationId == "Average" ? "Avg Temp" : stationId + " (Temp)";
+                            sigTemp.Axes.YAxis = yAxisTemp;
+                            tColorIdx++;
+                        }
+                    }
+                }
+            }
+
+            // --- 6. 画布刷新与乱码修复 ---
             MainChart.Plot.Axes.DateTimeTicksBottom();
             MainChart.Plot.Axes.Bottom.Label.Text = "Date & Hour";
 

@@ -67,6 +67,16 @@
                                     <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Rainfall" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
                                 </Grid>
 
+                                <!-- 气温数据行 -->
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="入库: 小时气温极简表" Command="{Binding ImportMultiDataCommand}" CommandParameter="Temperature" Style="{StaticResource AcademicButtonStyle}"/>
+                                    <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Temperature" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
+                                </Grid>
+                                
                                 <!-- 驻留数据行 -->
                                 <Grid Margin="0,2">
                                     <Grid.ColumnDefinitions>
@@ -271,11 +281,15 @@
                             <TextBlock Text="分析指标: " VerticalAlignment="Center" FontWeight="Bold" Foreground="#37474F"/>
                             <ComboBox Width="130" ItemsSource="{Binding ChartModes}" SelectedItem="{Binding SelectedChartMode}" Margin="5,0,20,0"/>
 
-                            <TextBlock Text="叠加气象数据: " VerticalAlignment="Center" FontWeight="Bold" Foreground="#37474F"/>
+                            <TextBlock Text="叠加降水数据: " VerticalAlignment="Center" FontWeight="Bold" Foreground="#37474F"/>
                             <ComboBox Width="180" Margin="5,0,0,0" 
                                   ItemsSource="{Binding AvailableStations}" 
                                   SelectedItem="{Binding SelectedStation}"/>
-
+                            
+                            <TextBlock Text="叠加气温数据: " VerticalAlignment="Center" FontWeight="Bold" Foreground="#37474F" Margin="15,0,0,0"/>
+                            <ComboBox Width="180" Margin="5,0,0,0" 
+                                      ItemsSource="{Binding AvailableTempStations}" 
+                                      SelectedItem="{Binding SelectedTempStation}"/>
                             <!-- 【新增】：锁定Y轴控件 -->
                             <CheckBox Content="🔒 锁定Y轴 (仅X轴滑动)" IsChecked="{Binding IsYAxisLocked}" 
                                       VerticalAlignment="Center" Margin="20,0,0,0" 

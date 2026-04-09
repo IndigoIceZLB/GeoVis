@@ -474,5 +474,76 @@ namespace GeoVis.Services
                 return conn.Query<OdFlowLine>(sql).ToList();
             });
         }
+
+        /// <summary>
+        /// 查询数据库中存在的所有气温站点名称
+        /// </summary>
+        public async Task<List<string>> GetTemperatureStationsAsync()
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    using var conn = DuckDbFactory.GetConnection();
+                    // 仅从气温表查询
+                    var list = conn.Query<string>("SELECT DISTINCT station FROM temperature_data ORDER BY station;").ToList();
+                    list.Insert(0, "NONE (关闭气温曲线)");
+                    list.Insert(1, "ALL STATIONS (Overlay 全叠加)");
+                    list.Insert(2, "ALL STATIONS (Average 平均)");
+                    return list;
+                }
+                catch { return new List<string>(); }
+            });
+        }
+
+        /// <summary>
+        /// 获取气温数据，返回结构为：字典 <站点名, 字典<时间, 气温值>>
+        /// </summary>
+        public async Task<Dictionary<string, Dictionary<DateTime, double>>> GetTemperatureMultiDataAsync(string stationName)
+        {
+            return await Task.Run(() =>
+            {
+                using var conn = DuckDbFactory.GetConnection();
+                string sql;
+
+                // 【科学重构】：将包络带计算全部下推至 DuckDB，确保数据口径绝对统一！
+                if (stationName == "ALL STATIONS (Overlay 全叠加)")
+                {
+                    sql = @"
+                        SELECT 'Min' AS Station, timestamp AS Time, CAST(MIN(temperature_c) AS DOUBLE) AS Value FROM temperature_data GROUP BY timestamp 
+                        UNION ALL 
+                        SELECT 'Max' AS Station, timestamp AS Time, CAST(MAX(temperature_c) AS DOUBLE) AS Value FROM temperature_data GROUP BY timestamp 
+                        UNION ALL 
+                        SELECT 'Avg' AS Station, timestamp AS Time, CAST(AVG(temperature_c) AS DOUBLE) AS Value FROM temperature_data GROUP BY timestamp;
+                    ";
+                }
+                else if (stationName == "ALL STATIONS (Average 平均)")
+                {
+                    sql = "SELECT 'Average' AS Station, timestamp AS Time, CAST(AVG(temperature_c) AS DOUBLE) AS Value FROM temperature_data GROUP BY timestamp;";
+                }
+                else
+                {
+                    sql = $"SELECT station_id AS Station, timestamp AS Time, CAST(temperature_c AS DOUBLE) AS Value FROM temperature_data WHERE station = '{stationName}';";
+                }
+
+                var list = conn.Query(sql);
+                var result = new Dictionary<string, Dictionary<DateTime, double>>();
+
+                foreach (var row in list)
+                {
+                    try
+                    {
+                        string st = row.Station.ToString();
+                        DateTime dt = Convert.ToDateTime(row.Time);
+                        double val = Convert.ToDouble(row.Value);
+
+                        if (!result.ContainsKey(st)) result[st] = new Dictionary<DateTime, double>();
+                        result[st][dt] = val;
+                    }
+                    catch { continue; }
+                }
+                return result;
+            });
+        }
     }
 }

@@ -73,6 +73,10 @@ namespace GeoVis.ViewModels
         // 气象数据类型变更为嵌套字典
         [ObservableProperty] private Dictionary<string, Dictionary<DateTime, double>> _rainfallMultiData;
 
+        [ObservableProperty] private List<string> _availableTempStations;
+        [ObservableProperty] private string _selectedTempStation;
+        [ObservableProperty] private Dictionary<string, Dictionary<DateTime, double>> _temperatureMultiData;
+
         [ObservableProperty] private List<string> _mapModes = new() { "OD 轨迹流向", "网格驻留人口", "月度常住人口" };
         private string _selectedMapMode = "OD 轨迹流向";
         public string SelectedMapMode
@@ -211,6 +215,7 @@ namespace GeoVis.ViewModels
                     {
                         "OD" => "od_data",
                         "Rainfall" => "rainfall_data",
+                        "Temperature" => "temperature_data",
                         "Mobility" => "mobility_data",
                         "Population" => "pop_data",
                         _ => "temp_data"
@@ -229,7 +234,12 @@ namespace GeoVis.ViewModels
         // 监听站点选择变化
         partial void OnSelectedStationChanged(string value)
         {
-            if (!string.IsNullOrEmpty(value))
+            if (string.IsNullOrEmpty(value) || value.Contains("NONE"))
+            {
+                RainfallMultiData?.Clear();
+                OnPropertyChanged(nameof(NetworkMetricsData)); // 触发清空重绘
+            }
+            else
             {
                 _ = LoadRainfallForChartAsync(value);
             }
@@ -353,6 +363,9 @@ namespace GeoVis.ViewModels
         {
             try
             {
+                var tempStations = await _dataService.GetTemperatureStationsAsync();
+                if (tempStations.Any()) AvailableTempStations = tempStations;
+
                 var stations = await _dataService.GetRainfallStationsAsync();
                 if (stations.Any()) AvailableStations = stations;
 
@@ -387,6 +400,7 @@ namespace GeoVis.ViewModels
                 {
                     "OD" => "od_data",
                     "Rainfall" => "rainfall_data",
+                    "Temperature" => "temperature_data",
                     "Mobility" => "mobility_data",
                     "Population" => "pop_data",
                     _ => "temp_data"
@@ -399,6 +413,7 @@ namespace GeoVis.ViewModels
                 if (dataType == "Rainfall") { AvailableStations = new(); RainfallMultiData?.Clear(); }
                 if (dataType == "OD") { NetworkMetricsData?.Clear(); }
                 if (dataType == "Mobility") { MobilityMetricsData?.Clear(); }
+                if (dataType == "Temperature") { AvailableTempStations = new(); TemperatureMultiData?.Clear(); }
 
                 OnPropertyChanged(nameof(NetworkMetricsData));
             }
@@ -430,6 +445,27 @@ namespace GeoVis.ViewModels
 
             // 直接通过已有的高频通道发给浏览器
             OnGeoJsonReadyToSend?.Invoke(System.Text.Json.JsonSerializer.Serialize(chartPayload));
+        }
+
+        // 监听气温站点选择变化
+        partial void OnSelectedTempStationChanged(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Contains("NONE"))
+            {
+                TemperatureMultiData?.Clear();
+                OnPropertyChanged(nameof(NetworkMetricsData)); // 触发清空重绘
+            }
+            else
+            {
+                _ = LoadTemperatureForChartAsync(value);
+            }
+        }
+
+        private async Task LoadTemperatureForChartAsync(string station)
+        {
+            TemperatureMultiData = await _dataService.GetTemperatureMultiDataAsync(station);
+            // 巧妙复用：触发 NetworkMetricsData 通知，即可驱动 MainWindow.xaml.cs 重新绘制整个图表
+            OnPropertyChanged(nameof(NetworkMetricsData));
         }
     }
 
