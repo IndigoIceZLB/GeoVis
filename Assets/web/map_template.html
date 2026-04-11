@@ -65,14 +65,63 @@
     </div>
 
     <script>
-        // --- 1. 初始化地图 ---
-        var map = L.map('map').setView([23.1291, 113.2644], 11);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+        // --- 0. 核心算法：WGS-84 转 GCJ-02 (火星坐标) ---
+        function outOfChina(lng, lat) {
+            return (lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271);
+        }
+        function transformLat(x, y) {
+            var ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+            ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+            ret += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
+            ret += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+            return ret;
+        }
+        function transformLng(x, y) {
+            var ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+            ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+            ret += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0;
+            ret += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0;
+            return ret;
+        }
+        function wgs84togcj02(lng, lat) {
+            if (outOfChina(lng, lat)) return [lng, lat];
+            var dlat = transformLat(lng - 105.0, lat - 35.0);
+            var dlng = transformLng(lng - 105.0, lat - 35.0);
+            var a = 6378245.0;
+            var ee = 0.00669342162296594323;
+            var radlat = lat / 180.0 * Math.PI;
+            var magic = Math.sin(radlat);
+            magic = 1 - ee * magic * magic;
+            var sqrtmagic = Math.sqrt(magic);
+            dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * Math.PI);
+            dlng = (dlng * 180.0) / (a / sqrtmagic * Math.cos(radlat) * Math.PI);
+            var mglat = lat + dlat;
+            var mglng = lng + dlng;
+            return [mglng, mglat];
+        }
 
-        // 【新增】：点击地图空白处，告诉 C# 恢复全局飞线
+        // 全局状态变量
+        var isMarsCRS = false;  // 当前是否是火星坐标系底图
+        var lastDataObj = null; // 缓存上一帧的数据，用于无缝重绘
+        // --- 1. 初始化地图与无密钥底图池 ---
+        var map = L.map('map').setView([23.1291, 113.2644], 11); // 默认广州视角
+
+        // 定义三套底图 (高德无需 Key 的通用瓦片接口)
+        var tileLayers = {
+            "Carto 极简白 (推荐)": L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }),
+            "高德标准街道图": L.tileLayer('http://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains: ["1", "2", "3", "4"], maxZoom: 19 }),
+            "高德高清卫星图": L.tileLayer('http://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', { subdomains: ["1", "2", "3", "4"], maxZoom: 19 })
+        };
+
+        // 默认加载 Carto 白
+        var currentBaseLayer = tileLayers["Carto 极简白 (推荐)"].addTo(map);
+
         map.on('click', function (e) {
             window.chrome.webview.postMessage({ type: 'map_bg_clicked' });
         });
+
+        // 【新增】：全局透明度变量，确保切换数据时保持用户设定的透明度
+        var currentGridOpacity = 0.8;
 
         function getColor(d) {
             return d > 20000 ? '#800026' : d > 10000 ? '#BD0026' : d > 5000 ? '#E31A1C' :
@@ -104,6 +153,14 @@
                 var gridCenters = {};
 
                 geoJsonLayer = L.geoJSON(dataObj, {
+                    // 【核心纠偏逻辑】：画图瞬间，动态拦截并偏移坐标点
+                    coordsToLatLng: function (coords) {
+                        if (isMarsCRS) {
+                            var shifted = wgs84togcj02(coords[0], coords[1]);
+                            return new L.LatLng(shifted[1], shifted[0]);
+                        }
+                        return new L.LatLng(coords[1], coords[0]);
+                    },
                     style: function (feature) {
                         var v1 = feature.properties.val1 || 0;
                         var v2 = feature.properties.val2 || 0;
@@ -121,7 +178,7 @@
                                 fillCol = v1 > 0 ? getColor(v1) : "transparent";
                             }
                         }
-                        return { fillColor: fillCol, weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: 0.8 };
+                        return { fillColor: fillCol, weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: currentGridOpacity };
                     },
                     onEachFeature: function (feature, layer) {
                         var v1 = feature.properties.val1 || 0;
@@ -266,11 +323,28 @@
         window.chrome.webview.addEventListener('message', event => {
             var payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
 
-            // 根据 C# 传来的 type 字段，决定渲染地图还是图表
             if (payload.type === 'rainfall_chart') {
                 renderECharts(payload);
-            } else {
-                renderGeoData(payload); // 默认渲染地图 GeoJSON
+            }
+            else if (payload.type === 'change_basemap') {
+                // 判断是否是高德地图，设定火星坐标状态
+                isMarsCRS = payload.style.includes("高德");
+
+                if (currentBaseLayer) map.removeLayer(currentBaseLayer);
+                currentBaseLayer = tileLayers[payload.style];
+                currentBaseLayer.addTo(map);
+
+                // 【神之一手】：切换底图后，如果内存里有空间数据，立即用新坐标系重新画一遍网格，实现无缝纠偏！
+                if (lastDataObj) renderGeoData(lastDataObj);
+            }
+            else if (payload.type === 'change_opacity') {
+                currentGridOpacity = payload.value;
+                if (geoJsonLayer) geoJsonLayer.setStyle({ fillOpacity: currentGridOpacity });
+            }
+            else {
+                // 收到新数据时，更新缓存并渲染
+                lastDataObj = payload;
+                renderGeoData(payload);
             }
         });
     </script>

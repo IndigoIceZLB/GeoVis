@@ -103,7 +103,25 @@
                         <Expander Header="2. 空间底图交互" IsExpanded="True" Foreground="#546E7A" FontWeight="Bold">
                             <StackPanel Margin="0,10,0,0">
                                 <Button Content="加载网格(GeoJSON)渲染" Command="{Binding LoadAndRenderMapCommand}" Margin="0,2" Style="{StaticResource AcademicButtonStyle}"/>
+                                <!-- 【新增】：底图切换与透明度调整区 -->
+                                <Border Background="#F5F7FA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,10,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="🌍 底图源与视图控制" FontWeight="Bold" Foreground="#37474F" Margin="0,0,0,10"/>
 
+                                        <TextBlock Text="在线卫星底图切换:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                        <ComboBox ItemsSource="{Binding BaseMapModes}" SelectedItem="{Binding SelectedBaseMap}" Background="White" Margin="0,0,0,10"/>
+
+                                        <TextBlock Text="{Binding GridOpacity, StringFormat='数据网格不透明度: {0:F2}'}" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                        <!-- 滑块设置 Minimum 为 0 (全透) 到 1 (不透)，TickFrequency 使滑动丝滑 -->
+                                        <Slider Minimum="0" Maximum="1" Value="{Binding GridOpacity}" 
+                                                TickFrequency="0.05" IsSnapToTickEnabled="True" 
+                                                Foreground="#4FC1E9"/>
+                                        <Grid Margin="0,0,0,5">
+                                            <TextBlock Text="透视" HorizontalAlignment="Left" FontSize="10" Foreground="Gray"/>
+                                            <TextBlock Text="遮盖" HorizontalAlignment="Right" FontSize="10" Foreground="Gray"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
                                 <!-- 时间切片控制台 (原封不动放进来) -->
                                 <Border Background="#F5F7FA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,10,0,0">
                                     <StackPanel>

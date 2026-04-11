@@ -93,6 +93,39 @@ namespace GeoVis.ViewModels
             set { if (SetProperty(ref _selectedAnalysisMode, value)) _ = UpdateMapByTimeAsync(); }
         }
 
+        // 【新增】：底图切换源
+        [ObservableProperty] private List<string> _baseMapModes = new() { "Carto 极简白 (推荐)", "高德标准街道图", "高德高清卫星图" };
+        private string _selectedBaseMap = "Carto 极简白 (推荐)";
+        public string SelectedBaseMap
+        {
+            get => _selectedBaseMap;
+            set
+            {
+                if (SetProperty(ref _selectedBaseMap, value))
+                {
+                    // 仅发送轻量级指令，不重新查询数据库
+                    var payload = new { type = "change_basemap", style = value };
+                    OnGeoJsonReadyToSend?.Invoke(System.Text.Json.JsonSerializer.Serialize(payload));
+                }
+            }
+        }
+
+        // 【新增】：网格透明度绑定
+        private double _gridOpacity = 0.8;
+        public double GridOpacity
+        {
+            get => _gridOpacity;
+            set
+            {
+                if (SetProperty(ref _gridOpacity, value))
+                {
+                    // 零延迟：直接通知前端修改 CSS 属性，绝对不触发重绘！
+                    var payload = new { type = "change_opacity", value = value };
+                    OnGeoJsonReadyToSend?.Invoke(System.Text.Json.JsonSerializer.Serialize(payload));
+                }
+            }
+        }
+
         [ObservableProperty] private List<string> _odDisplayModes = new() { "总流量", "流出流量", "流入流量" };
         private string _selectedOdDisplayMode = "总流量";
         public string SelectedOdDisplayMode
