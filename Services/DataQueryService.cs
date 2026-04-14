@@ -545,5 +545,154 @@ namespace GeoVis.Services
                 return result;
             });
         }
+
+        public class HabitShiftShare
+        {
+            public string DateStr { get; set; }
+            public int HabitHour { get; set; }
+            public string Period { get; set; }
+            public string ShiftType { get; set; }
+            public double SharePct { get; set; }
+        }
+
+        /// <summary>
+        /// 【全新引擎】：利用 SQL 动态完成 Python 的数据分组计算 (计算指定日期的逐小时出行变化占比)
+        /// </summary>
+        public async Task<List<HabitShiftShare>> GetHabitHourlyShareAsync(int targetDate, bool includeMissing)
+        {
+            return await Task.Run(() =>
+            {
+                using var conn = DuckDbFactory.GetConnection();
+                // 如果传入 20230404，转为 2023-04-04 兼容格式
+                string dateLike = DateTime.ParseExact(targetDate.ToString(), "yyyyMMdd", null).ToString("yyyy-MM-dd");
+
+                string missingFilter = includeMissing ? "" : "AND shift_type NOT LIKE '%消失%'";
+
+                // DuckDB CTE 魔法：自动完成数据清洗与除法计算
+                string sql = $@"
+            WITH clean_data AS (
+                SELECT 
+                    CAST(date AS VARCHAR) AS date_str,
+                    CAST(habit_hour AS INTEGER) AS h_hour,
+                    shift_type,
+                    CAST(user_cnt AS DOUBLE) AS cnt
+                FROM habit_data
+                WHERE CAST(date AS VARCHAR) LIKE '%{dateLike}%' {missingFilter}
+            ),
+            grouped AS (
+                SELECT date_str, h_hour, shift_type, SUM(cnt) AS sum_cnt 
+                FROM clean_data GROUP BY date_str, h_hour, shift_type
+            ),
+            totals AS (
+                SELECT date_str, h_hour, SUM(sum_cnt) AS total_cnt 
+                FROM grouped GROUP BY date_str, h_hour
+            )
+            SELECT 
+                g.date_str AS DateStr, 
+                g.h_hour AS HabitHour, 
+                g.shift_type AS ShiftType, 
+                (g.sum_cnt * 100.0 / t.total_cnt) AS SharePct
+            FROM grouped g
+            JOIN totals t ON g.date_str = t.date_str AND g.h_hour = t.h_hour
+            ORDER BY g.h_hour, g.shift_type;
+        ";
+                return conn.Query<HabitShiftShare>(sql).ToList();
+            });
+        }
+
+        // [Method: 获取特定时段的多日占比趋势]
+        public async Task<List<HabitShiftShare>> GetHabitPeriodShareAsync(bool includeMissing, string filterPeriod = null, List<int> targetDates = null)
+        {
+            return await Task.Run(() =>
+            {
+                using var conn = DuckDbFactory.GetConnection();
+                string missingFilter = includeMissing ? "" : "AND shift_type NOT LIKE '%消失%'";
+                string periodFilter = string.IsNullOrEmpty(filterPeriod) ? "" : $"WHERE period_name = '{filterPeriod}'";
+
+                // 将传入的 20230501 转为 '2023-05-01' 用于 SQL IN 过滤
+                string dateFilter = targetDates != null && targetDates.Any()
+                    ? $"AND CAST(date AS VARCHAR) IN ({string.Join(",", targetDates.Select(d => $"'{DateTime.ParseExact(d.ToString(), "yyyyMMdd", null):yyyy-MM-dd}'"))})"
+                    : "";
+
+                string sql = $@"
+            WITH base_mapped AS (
+                SELECT CAST(date AS VARCHAR) AS date_str, shift_type, CAST(user_cnt AS DOUBLE) AS cnt,
+                    CASE 
+                        WHEN habit_hour BETWEEN 0 AND 5 THEN 'Lingchen 00-05'
+                        WHEN habit_hour BETWEEN 6 AND 9 THEN 'Morning peak 06-09'
+                        WHEN habit_hour BETWEEN 10 AND 16 THEN 'Daytime 10-16'
+                        WHEN habit_hour BETWEEN 17 AND 20 THEN 'Evening peak 17-20'
+                        ELSE 'Night 21-23'
+                    END AS period_name
+                FROM habit_data WHERE 1=1 {missingFilter} {dateFilter}
+            ),
+            grouped AS (
+                SELECT date_str, period_name, shift_type, SUM(cnt) AS sum_cnt 
+                FROM base_mapped {periodFilter} GROUP BY date_str, period_name, shift_type
+            ),
+            totals AS (
+                SELECT date_str, period_name, SUM(sum_cnt) AS total_cnt 
+                FROM grouped GROUP BY date_str, period_name
+            )
+            SELECT g.date_str AS DateStr, g.period_name AS Period, g.shift_type AS ShiftType, 
+                   (g.sum_cnt * 100.0 / t.total_cnt) AS SharePct
+            FROM grouped g JOIN totals t ON g.date_str = t.date_str AND g.period_name = t.period_name
+            ORDER BY g.date_str, g.period_name, g.shift_type;
+        ";
+                return conn.Query<HabitShiftShare>(sql).ToList();
+            });
+        }
+
+        // [Method: 获取特定单小时的多日横向对比]
+        public async Task<List<HabitShiftShare>> GetHabitHourAcrossDaysAsync(bool includeMissing, int targetHour, List<int> targetDates = null)
+        {
+            return await Task.Run(() =>
+            {
+                using var conn = DuckDbFactory.GetConnection();
+                string missingFilter = includeMissing ? "" : "AND shift_type NOT LIKE '%消失%'";
+
+                string dateFilter = targetDates != null && targetDates.Any()
+                    ? $"AND CAST(date AS VARCHAR) IN ({string.Join(",", targetDates.Select(d => $"'{DateTime.ParseExact(d.ToString(), "yyyyMMdd", null):yyyy-MM-dd}'"))})"
+                    : "";
+
+                string sql = $@"
+            WITH clean_data AS (
+                SELECT CAST(date AS VARCHAR) AS date_str, shift_type, CAST(user_cnt AS DOUBLE) AS cnt
+                FROM habit_data WHERE habit_hour = {targetHour} {missingFilter} {dateFilter}
+            ),
+            grouped AS (
+                SELECT date_str, shift_type, SUM(cnt) AS sum_cnt 
+                FROM clean_data GROUP BY date_str, shift_type
+            ),
+            totals AS (
+                SELECT date_str, SUM(sum_cnt) AS total_cnt 
+                FROM grouped GROUP BY date_str
+            )
+            SELECT g.date_str AS DateStr, '{targetHour}:00' AS Period, g.shift_type AS ShiftType, 
+                   (g.sum_cnt * 100.0 / t.total_cnt) AS SharePct
+            FROM grouped g JOIN totals t ON g.date_str = t.date_str
+            ORDER BY g.date_str, g.shift_type;
+        ";
+                return conn.Query<HabitShiftShare>(sql).ToList();
+            });
+        }
+
+        /// <summary>
+        /// 【新增】：专门从 habit_data 表独立提取所有可用日期，彻底解耦
+        /// </summary>
+        public async Task<List<int>> GetHabitAvailableDatesAsync()
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    using var conn = DuckDbFactory.GetConnection();
+                    // 将 2023-05-17 这种字符串剔除破折号，转为 20230517 整型
+                    string sql = "SELECT DISTINCT CAST(REPLACE(CAST(date AS VARCHAR), '-', '') AS INTEGER) FROM habit_data ORDER BY 1;";
+                    return conn.Query<int>(sql).ToList();
+                }
+                catch { return new List<int>(); }
+            });
+        }
     }
 }

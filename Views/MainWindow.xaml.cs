@@ -1,11 +1,12 @@
 ﻿// Views/MainWindow.xaml.cs
-using System;
-using System.ComponentModel;
-using System.Linq;
-using System.Windows;
+using GeoVis.Services;
 using GeoVis.ViewModels;
 using ScottPlot;
+using System;
+using System.ComponentModel;
 using System.IO;
+using System.Linq;
+using System.Windows;
 
 namespace GeoVis.Views
 {
@@ -23,7 +24,14 @@ namespace GeoVis.Views
             vm.PropertyChanged += ViewModel_PropertyChanged;
 
             // 【新增这一行】：监听 ViewModel 发出的 JSON 字符串，并通过 WebView2 投递给 JS
-            vm.OnGeoJsonReadyToSend += jsonStr => MapWebView.CoreWebView2.PostWebMessageAsJson(jsonStr);
+            vm.OnGeoJsonReadyToSend += jsonStr =>
+            {
+                // 判空保护：如果浏览器内核还没初始化完成，直接丢弃消息，防止崩溃！
+                if (MapWebView != null && MapWebView.CoreWebView2 != null)
+                {
+                    MapWebView.CoreWebView2.PostWebMessageAsJson(jsonStr);
+                }
+            };
 
             // 初始化一个空的坐标系样式
             InitializeChartStyle();
@@ -122,6 +130,11 @@ namespace GeoVis.Views
                     }
                 }
                 MainChart.Refresh();
+            }
+
+            if (e.PropertyName == nameof(MainViewModel.HabitChartData))
+            {
+                RenderHabitShiftChart(vm);
             }
         }
 
@@ -372,6 +385,368 @@ namespace GeoVis.Views
 
             MainChart.Refresh();
         }
-       
+
+        // [Method: 渲染出行习惯分析主图表 - 完整且包含所有分支]
+        private void RenderHabitShiftChart(MainViewModel vm)
+        {
+            if (vm.HabitChartData is not List<DataQueryService.HabitShiftShare> data || !data.Any()) return;
+
+            HabitMainChart.Reset();
+
+            var englishLabels = new Dictionary<string, string>
+    {
+        { "1_提前2小时及以上", "Early >=2h" }, { "2_提前1小时", "Early 1h" },
+        { "3_按时出行", "On time" }, { "4_推迟1小时", "Delay 1h" },
+        { "5_推迟2小时及以上", "Delay >=2h" }, { "6_消失未出行", "Missing" }
+    };
+            var shiftColors = new Dictionary<string, ScottPlot.Color>
+    {
+        { "1_提前2小时及以上", ScottPlot.Color.FromHex("#4575b4") }, { "2_提前1小时", ScottPlot.Color.FromHex("#91bfdb") },
+        { "3_按时出行", ScottPlot.Color.FromHex("#66bd63") }, { "4_推迟1小时", ScottPlot.Color.FromHex("#fdae61") },
+        { "5_推迟2小时及以上", ScottPlot.Color.FromHex("#d73027") }, { "6_消失未出行", ScottPlot.Color.FromHex("#8c8c8c") }
+    };
+
+            var shiftTypes = data.Select(x => x.ShiftType).Distinct().OrderBy(x => x).ToList();
+
+            if (vm.SelectedHabitChartMode.Contains("单日全天"))
+                HabitMainChart.Plot.Title("Hourly Composition of Habit Shifts (Single Day)");
+            else
+                HabitMainChart.Plot.Title("Cross-day Habit Shift Trend");
+
+            // ==========================================
+            // 模式 1：多日时段横向对比 (全新！堆叠柱状)
+            // ==========================================
+            if (vm.SelectedHabitChartMode == "多日时段横向对比 (堆叠柱状)")
+            {
+                var dates = data.Select(x => x.DateStr).Distinct().OrderBy(x => x).ToList();
+                int numDates = dates.Count;
+                double[] xs = Enumerable.Range(0, numDates).Select(x => (double)x).ToArray();
+                double[] bottoms = new double[numDates];
+
+                foreach (var type in shiftTypes)
+                {
+                    double[] ys = new double[numDates];
+                    for (int d = 0; d < numDates; d++)
+                    {
+                        var row = data.FirstOrDefault(x => x.ShiftType == type && x.DateStr == dates[d]);
+                        ys[d] = row != null ? row.SharePct : 0;
+                    }
+
+                    var bar = HabitMainChart.Plot.Add.Bars(xs, ys);
+                    bar.Color = shiftColors.ContainsKey(type) ? shiftColors[type] : Colors.Gray;
+                    bar.Label = englishLabels.ContainsKey(type) ? englishLabels[type] : type;
+
+                    for (int i = 0; i < numDates; i++)
+                    {
+                        bar.Bars[i].ValueBase = bottoms[i];
+                        bottoms[i] += ys[i];
+                        bar.Bars[i].Value = bottoms[i];
+                        bar.Bars[i].Size = 0.6; // 控制柱子粗细
+                    }
+                }
+                ScottPlot.Tick[] ticks = new ScottPlot.Tick[numDates];
+                for (int i = 0; i < numDates; i++) ticks[i] = new ScottPlot.Tick(i, dates[i].Length > 5 ? dates[i].Substring(5) : dates[i]);
+                HabitMainChart.Plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericManual(ticks);
+                HabitMainChart.Plot.Axes.Bottom.Label.Text = "Date";
+                HabitMainChart.Plot.Axes.Left.Label.Text = $"Share in {vm.SelectedHabitPeriod} (%)";
+                HabitMainChart.Plot.Axes.SetLimits(-0.6, numDates - 0.4, 0, 100);
+            }
+            // ==========================================
+            // 模式 2：特定小时横向对比 (分组柱状)
+            // ==========================================
+            else if (vm.SelectedHabitChartMode == "特定小时横向对比 (分组柱状)")
+            {
+                var dates = data.Select(x => x.DateStr).Distinct().OrderBy(x => x).ToList();
+                int numDates = dates.Count;
+                int numTypes = shiftTypes.Count;
+                double[] xs = Enumerable.Range(0, numDates).Select(x => (double)x).ToArray();
+                double groupWidth = 0.8; double barWidth = groupWidth / numTypes;
+
+                for (int i = 0; i < numTypes; i++)
+                {
+                    string type = shiftTypes[i];
+                    double[] ys = new double[numDates];
+                    for (int d = 0; d < numDates; d++)
+                    {
+                        var row = data.FirstOrDefault(x => x.ShiftType == type && x.DateStr == dates[d]);
+                        ys[d] = row != null ? row.SharePct : 0;
+                    }
+                    double[] shiftedXs = xs.Select(x => x - groupWidth / 2 + (i + 0.5) * barWidth).ToArray();
+                    var bar = HabitMainChart.Plot.Add.Bars(shiftedXs, ys);
+                    bar.Color = shiftColors.ContainsKey(type) ? shiftColors[type] : Colors.Gray;
+                    bar.Label = englishLabels.ContainsKey(type) ? englishLabels[type] : type;
+                    foreach (var b in bar.Bars) b.Size = barWidth * 0.85;
+                }
+
+                ScottPlot.Tick[] ticks = new ScottPlot.Tick[numDates];
+                for (int i = 0; i < numDates; i++) ticks[i] = new ScottPlot.Tick(i, dates[i].Length > 5 ? dates[i].Substring(5) : dates[i]);
+                HabitMainChart.Plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericManual(ticks);
+                HabitMainChart.Plot.Axes.Bottom.Label.Text = "Date";
+                HabitMainChart.Plot.Axes.Left.Label.Text = "Share (%)";
+                HabitMainChart.Plot.Axes.SetLimits(-0.5, numDates - 0.5, 0, null);
+            }
+            // ==========================================
+            // 模式 3：逐时占比 (单日全天堆叠图)
+            // ==========================================
+            else if (vm.SelectedHabitChartMode == "逐时占比 (单日全天堆叠图)")
+            {
+                int hours = 24;
+                double[] xs = Enumerable.Range(0, hours).Select(x => (double)x).ToArray();
+                double[] bottoms = new double[hours];
+
+                foreach (var type in shiftTypes)
+                {
+                    double[] ys = new double[hours];
+                    var typeData = data.Where(x => x.ShiftType == type).ToList();
+                    foreach (var d in typeData) ys[d.HabitHour] = d.SharePct;
+
+                    var bar = HabitMainChart.Plot.Add.Bars(xs, ys);
+                    bar.Color = shiftColors.ContainsKey(type) ? shiftColors[type] : Colors.Gray;
+                    bar.Label = englishLabels.ContainsKey(type) ? englishLabels[type] : type;
+
+                    for (int i = 0; i < hours; i++)
+                    {
+                        bar.Bars[i].ValueBase = bottoms[i];
+                        bottoms[i] += ys[i];
+                        bar.Bars[i].Value = bottoms[i];
+                    }
+                }
+                HabitMainChart.Plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericAutomatic();
+                HabitMainChart.Plot.Axes.Bottom.Label.Text = "Habit Hour (0-23)";
+                HabitMainChart.Plot.Axes.Left.Label.Text = "Share Percentage (%)";
+                HabitMainChart.Plot.Axes.SetLimits(-0.5, 23.5, 0, 100);
+            }
+            // ==========================================
+            // 模式 4：多日时段趋势 (折线图)
+            // ==========================================
+            else if (vm.SelectedHabitChartMode == "多日时段趋势 (折线图)")
+            {
+                var dates = data.Select(x => x.DateStr).Distinct().OrderBy(x => x).ToList();
+                int numDates = dates.Count;
+                double[] xs = Enumerable.Range(0, numDates).Select(x => (double)x).ToArray();
+
+                foreach (var type in shiftTypes)
+                {
+                    double[] ys = new double[numDates];
+                    for (int d = 0; d < numDates; d++)
+                    {
+                        var row = data.FirstOrDefault(x => x.ShiftType == type && x.DateStr == dates[d]);
+                        ys[d] = row != null ? row.SharePct : 0;
+                    }
+
+                    var scatter = HabitMainChart.Plot.Add.Scatter(xs, ys);
+                    scatter.Color = shiftColors.ContainsKey(type) ? shiftColors[type] : Colors.Gray;
+                    scatter.Label = englishLabels.ContainsKey(type) ? englishLabels[type] : type;
+                    scatter.LineWidth = 2.5f;
+                    scatter.MarkerSize = 7;
+                }
+
+                ScottPlot.Tick[] ticks = new ScottPlot.Tick[numDates];
+                for (int i = 0; i < numDates; i++) ticks[i] = new ScottPlot.Tick(i, dates[i].Length >= 10 ? dates[i].Substring(5) : dates[i]);
+                HabitMainChart.Plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericManual(ticks);
+                HabitMainChart.Plot.Axes.Bottom.Label.Text = "Date";
+                HabitMainChart.Plot.Axes.Left.Label.Text = $"Share in {vm.SelectedHabitPeriod} (%)";
+                HabitMainChart.Plot.Axes.SetLimits(-0.5, numDates - 0.5, 0, null);
+            }
+
+            // 绘制图例
+            HabitMainChart.Plot.ShowLegend(ScottPlot.Alignment.UpperRight);
+
+            // 【全新逻辑】：因为下方降水图对齐需要上方画布彻底稳定，强行执行一次布局重置
+            HabitMainChart.Refresh();
+
+            // ===== 渲染底部的全宽降水图 =====
+            if (vm.ShowHabitRainfall)
+            {
+                RenderFloatingRainfallChart(vm, data);
+            }
+        }
+
+        // [Method: 彻底修复版 - 动态全对齐降水图表]
+        private void RenderFloatingRainfallChart(MainViewModel vm, List<DataQueryService.HabitShiftShare> habitData)
+        {
+            HabitRainfallChart.Reset();
+            if (vm.RainfallMultiData == null || !vm.RainfallMultiData.Any()) return;
+
+            string uiStation = vm.SelectedHabitRainfallStation ?? "Average";
+
+            // 提取目前图表上存在的独立日期数组
+            var targetDates = habitData.Select(x => x.DateStr).Distinct().OrderBy(x => x).ToList();
+            int numDates = targetDates.Count;
+            if (numDates == 0) return;
+
+            // 【终极修复】：处理“全叠加”和“特定站点”的字典提取逻辑
+            List<string> stationsToDraw = new();
+            if (uiStation == "ALL STATIONS (Overlay 全叠加)")
+            {
+                stationsToDraw = vm.RainfallMultiData.Keys.ToList();
+            }
+            else if (uiStation == "ALL STATIONS (Average 平均)")
+            {
+                if (vm.RainfallMultiData.ContainsKey("Average")) stationsToDraw.Add("Average");
+            }
+            else
+            {
+                // 【核心修复】：如果是单一站点，由于底层查询方法只返回该站点的结果
+                // 所以字典里必定只有 1 个 Key。我们不管这个 Key 叫 S001 还是什么，直接全取出来！
+                if (vm.RainfallMultiData.Keys.Any())
+                {
+                    stationsToDraw.Add(vm.RainfallMultiData.Keys.First());
+                }
+            }
+
+            if (!stationsToDraw.Any()) return;
+
+            // 颜色轮盘，全叠加时用
+            string[] palette = { "#4FC1E9", "#ED5565", "#A0D468", "#FFCE54", "#AC92EC", "#48CFAD" };
+            int colorIdx = 0;
+
+            foreach (var stKey in stationsToDraw)
+            {
+                var rainDict = vm.RainfallMultiData[stKey];
+                List<double> xs = new();
+                List<double> ys = new();
+
+                // 模式 A：单日全天堆叠图 (0-23 X轴)
+                if (vm.SelectedHabitChartMode.Contains("单日全天"))
+                {
+                    string singleDate = DateTime.ParseExact(vm.HabitSelectedSingleDate.ToString(), "yyyyMMdd", null).ToString("yyyy-MM-dd");
+                    for (int h = 0; h < 24; h++)
+                    {
+                        var matchTime = rainDict.Keys.FirstOrDefault(k => k.ToString("yyyy-MM-dd") == singleDate && k.Hour == h);
+                        xs.Add(h);
+                        ys.Add(matchTime != default ? rainDict[matchTime] : 0);
+                    }
+                    HabitRainfallChart.Plot.Axes.SetLimitsX(-0.5, 23.5);
+                    HabitRainfallChart.Plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericAutomatic();
+                    HabitRainfallChart.Plot.Axes.Bottom.Label.Text = "Hour of Day";
+                }
+                else // 模式 B：跨日统计 (X轴对应 0, 1, 2...)
+                {
+                    for (int d = 0; d < numDates; d++)
+                    {
+                        string dateStr = targetDates[d];
+                        double rainSum = 0;
+
+                        if (vm.SelectedHabitChartMode.Contains("特定小时横向对比"))
+                        {
+                            int h = vm.SelectedHabitHour;
+                            var matchTime = rainDict.Keys.FirstOrDefault(k => k.ToString("yyyy-MM-dd") == dateStr && k.Hour == h);
+                            if (matchTime != default) rainSum = rainDict[matchTime];
+                        }
+                        else
+                        {
+                            // 时段趋势 或 时段堆叠 的区间提取
+                            List<int> validHours = vm.SelectedHabitPeriod switch
+                            {
+                                string p when p.Contains("06-09") => new() { 6, 7, 8, 9 },
+                                string p when p.Contains("10-16") => new() { 10, 11, 12, 13, 14, 15, 16 },
+                                string p when p.Contains("17-20") => new() { 17, 18, 19, 20 },
+                                string p when p.Contains("00-05") => new() { 0, 1, 2, 3, 4, 5 },
+                                _ => new() { 21, 22, 23 }
+                            };
+                            rainSum = rainDict.Where(k => k.Key.ToString("yyyy-MM-dd") == dateStr && validHours.Contains(k.Key.Hour)).Sum(k => k.Value);
+                        }
+                        xs.Add(d);
+                        ys.Add(rainSum);
+                    }
+
+                    HabitRainfallChart.Plot.Axes.SetLimitsX(-0.6, numDates - 0.4);
+                    ScottPlot.Tick[] ticks = new ScottPlot.Tick[numDates];
+                    for (int i = 0; i < numDates; i++) ticks[i] = new ScottPlot.Tick(i, targetDates[i].Length > 5 ? targetDates[i].Substring(5) : targetDates[i]);
+                    HabitRainfallChart.Plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericManual(ticks);
+                    HabitRainfallChart.Plot.Axes.Bottom.Label.Text = "Date";
+                }
+
+                if (xs.Any())
+                {
+                    var bars = HabitRainfallChart.Plot.Add.Bars(xs.ToArray(), ys.ToArray());
+                    // 如果是全叠加模式，加入 50% 的透明度以方便辨认
+                    if (uiStation == "ALL STATIONS (Overlay 全叠加)")
+                    {
+                        var hex = palette[colorIdx % palette.Length];
+                        bars.Color = ScottPlot.Color.FromHex(hex).WithAlpha(120);
+                    }
+                    else
+                    {
+                        bars.Color = ScottPlot.Color.FromHex("#4FC1E9");
+                    }
+
+                    foreach (var b in bars.Bars) b.Size = 0.6;
+                }
+                colorIdx++;
+            }
+
+            HabitRainfallChart.Plot.Axes.Bottom.TickLabelStyle.FontSize = 11;
+            HabitRainfallChart.Plot.Axes.Left.Label.Text = "Rain (mm)";
+            HabitRainfallChart.Refresh();
+        }
+
+        // ==========================================
+        // 【新增功能】：鼠标悬浮数据探针解析引擎
+        // ==========================================
+        private void HabitMainChart_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            // 鼠标移出画布，隐藏信息板
+            HabitTooltipBorder.Visibility = Visibility.Collapsed;
+        }
+
+        private void HabitMainChart_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            var vm = this.DataContext as MainViewModel;
+            if (vm?.HabitChartData is not List<DataQueryService.HabitShiftShare> data || !data.Any()) return;
+
+            // 1. 获取鼠标像素并逆向映射为图表上的笛卡尔坐标 (X, Y)
+            var mousePos = e.GetPosition(HabitMainChart);
+            ScottPlot.Pixel mousePixel = new ScottPlot.Pixel((float)mousePos.X, (float)mousePos.Y);
+            ScottPlot.Coordinates mouseLocation = HabitMainChart.Plot.GetCoordinates(mousePixel);
+
+            // 2. 将浮点 X 坐标四舍五入，寻找最近的柱子索引
+            int targetX = (int)Math.Round(mouseLocation.X);
+
+            var englishLabels = new Dictionary<string, string>
+    {
+        { "1_提前2小时及以上", "Early >=2h" }, { "2_提前1小时", "Early 1h" },
+        { "3_按时出行", "On time" }, { "4_推迟1小时", "Delay 1h" },
+        { "5_推迟2小时及以上", "Delay >=2h" }, { "6_消失未出行", "Missing" }
+    };
+
+            string tooltipMsg = "";
+
+            // 3. 根据当前模式解析 X 轴代表的含义
+            if (vm.SelectedHabitChartMode.Contains("单日全天"))
+            {
+                // 模式 A：X 代表 0-23 小时
+                if (targetX < 0 || targetX > 23) { HabitTooltipBorder.Visibility = Visibility.Collapsed; return; }
+
+                var hourData = data.Where(x => x.HabitHour == targetX).OrderBy(x => x.ShiftType).ToList();
+                if (!hourData.Any()) { HabitTooltipBorder.Visibility = Visibility.Collapsed; return; }
+
+                tooltipMsg += $"⏱️ Habit Hour: {targetX:D2}:00\n";
+                tooltipMsg += "----------------------\n";
+                foreach (var d in hourData)
+                    tooltipMsg += $"[{englishLabels[d.ShiftType]}]: {d.SharePct:F2}%\n";
+            }
+            else
+            {
+                // 模式 B：X 代表日期数组的索引
+                var dates = data.Select(x => x.DateStr).Distinct().OrderBy(x => x).ToList();
+                if (targetX < 0 || targetX >= dates.Count) { HabitTooltipBorder.Visibility = Visibility.Collapsed; return; }
+
+                string targetDate = dates[targetX];
+                var dayData = data.Where(x => x.DateStr == targetDate).OrderBy(x => x.ShiftType).ToList();
+                if (!dayData.Any()) { HabitTooltipBorder.Visibility = Visibility.Collapsed; return; }
+
+                tooltipMsg += $"📅 Date: {targetDate}\n";
+                tooltipMsg += "----------------------\n";
+                foreach (var d in dayData)
+                    tooltipMsg += $"[{englishLabels[d.ShiftType]}]: {d.SharePct:F2}%\n";
+            }
+
+            // 4. 更新 UI 显示
+            HabitTooltipText.Text = tooltipMsg.TrimEnd('\n');
+            HabitTooltipBorder.Visibility = Visibility.Visible;
+        }
+
     }
 }

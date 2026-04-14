@@ -42,6 +42,7 @@ namespace GeoVis.ViewModels
                 {
                     _ = UpdateMapByTimeAsync();
                     _ = UpdateMapRainfallAsync(); // 同步更新右下角降水图表
+                    _ = UpdateHabitShiftChartAsync();
                 }
             }
         }
@@ -137,6 +138,58 @@ namespace GeoVis.ViewModels
 
         // 【新增】：用于控制Y轴锁定的属性
         [ObservableProperty] private bool _isYAxisLocked = false;
+
+        // ====== 【出行习惯分析模块：独立属性与状态控制】 ======
+        [ObservableProperty] private bool _includeMissingShift = false;
+        partial void OnIncludeMissingShiftChanged(bool value) => _ = UpdateHabitShiftChartAsync();
+
+        // 【修改 1】：增加“多日时段横向对比 (堆叠图)”新模式
+        [ObservableProperty]
+        private List<string> _habitChartModes = new() {
+    "逐时占比 (单日全天堆叠图)", "多日时段横向对比 (堆叠柱状)", "特定小时横向对比 (分组柱状)", "多日时段趋势 (折线图)"
+};
+        [ObservableProperty] private string _selectedHabitChartMode = "多日时段横向对比 (堆叠柱状)";
+        partial void OnSelectedHabitChartModeChanged(string value) => _ = UpdateHabitShiftChartAsync();
+
+        [ObservableProperty] private List<string> _availableHabitPeriods = new() { "Morning peak 06-09", "Evening peak 17-20", "Daytime 10-16", "Lingchen 00-05", "Night 21-23" };
+        [ObservableProperty] private string _selectedHabitPeriod = "Morning peak 06-09";
+        partial void OnSelectedHabitPeriodChanged(string value) => _ = UpdateHabitShiftChartAsync();
+
+        [ObservableProperty] private int _selectedHabitHour = 8;
+        partial void OnSelectedHabitHourChanged(int value) => _ = UpdateHabitShiftChartAsync();
+
+        // 【修改 2】：彻底修复降水站点切换逻辑
+        [ObservableProperty] private string _selectedHabitRainfallStation = "ALL STATIONS (Average 平均)";
+        async partial void OnSelectedHabitRainfallStationChanged(string value)
+        {
+            if (!string.IsNullOrEmpty(value) && !value.Contains("NONE"))
+            {
+                // 每次切换气象站，强制重新查库拉取最新该站字典
+                RainfallMultiData = await _dataService.GetRainfallMultiDataAsync(value);
+                // 通知 UI 必须重绘！
+                OnPropertyChanged(nameof(HabitChartData));
+            }
+        }
+
+        [ObservableProperty] private bool _showHabitRainfall = true;
+        partial void OnShowHabitRainfallChanged(bool value) => OnPropertyChanged(nameof(HabitChartData));
+
+        [ObservableProperty] private int _habitSelectedSingleDate;
+        partial void OnHabitSelectedSingleDateChanged(int value) => _ = UpdateHabitShiftChartAsync();
+
+        [ObservableProperty] private System.Collections.ObjectModel.ObservableCollection<DateSelectionItem> _habitReferenceDates = new();
+
+        [ObservableProperty] private bool _isAllHabitDatesSelected = true;
+        private bool _isBatchUpdatingDates = false;
+        partial void OnIsAllHabitDatesSelectedChanged(bool value)
+        {
+            _isBatchUpdatingDates = true;
+            foreach (var item in HabitReferenceDates) item.IsSelected = value;
+            _isBatchUpdatingDates = false;
+            _ = UpdateHabitShiftChartAsync();
+        }
+        [ObservableProperty] private List<int> _habitAvailableDates = new();
+        [ObservableProperty] private object _habitChartData;
 
         // 【新增】：是否开启 Top 10 飞线渲染
         private bool _showTopFlows = false;
@@ -244,6 +297,7 @@ namespace GeoVis.ViewModels
                 StatusMessage = $"正在导入 {dataType}...";
                 try
                 {
+                    // 【重点修复：补齐 Habit 到 habit_data 的映射】
                     string tableName = dataType switch
                     {
                         "OD" => "od_data",
@@ -251,13 +305,13 @@ namespace GeoVis.ViewModels
                         "Temperature" => "temperature_data",
                         "Mobility" => "mobility_data",
                         "Population" => "pop_data",
+                        "Habit" => "habit_data",  // <---- 必须加上这一行
                         _ => "temp_data"
                     };
 
                     var (rows, ms) = await _dataService.ImportTableAsync(tableName, ofd.FileName);
                     StatusMessage = $"【{dataType}】导入成功: {rows:N0} 行, 耗时 {ms}ms | {DuckDbFactory.GetDatabaseInfo()}";
 
-                    // 【修复】：导入完成后，自动刷新图表和站点！
                     await AutoLoadDataFromDatabaseAsync();
                 }
                 catch (Exception ex) { StatusMessage = $"导入失败: {ex.Message}"; }
@@ -415,12 +469,35 @@ namespace GeoVis.ViewModels
                 if (stations.Any())
                 {
                     MapStations.Clear();
-                    foreach (var s in stations.Skip(3)) MapStations.Add(new StationSelectionItem { StationId = s, IsSelected = false });
-                   
+                    foreach (var s in stations.Skip(3)) MapStations.Add(new StationSelectionItem { StationId = s, IsSelected = false });                  
                 }
+
+                // ====== 【新增：解耦的 Habit 模块初始化】 ======
+                var habitDates = await _dataService.GetHabitAvailableDatesAsync();
+                if (habitDates.Any())
+                {
+                    HabitAvailableDates = habitDates; // 给堆叠图下拉框供电
+                    HabitSelectedSingleDate = habitDates.First(); // 赋予默认值，不再是0
+
+                    HabitReferenceDates.Clear();
+                    foreach (var d in habitDates)
+                    {
+                        var item = new DateSelectionItem { DateValue = d, DisplayDate = d.ToString(), IsSelected = true };
+                        item.OnSelectionChanged = () => { if (!_isBatchUpdatingDates) _ = UpdateHabitShiftChartAsync(); };
+                        HabitReferenceDates.Add(item);
+                    }
+                }
+
+                // 确保默认的气象平均数据被加载进入内存
+                if (RainfallMultiData == null || !RainfallMultiData.Any())
+                {
+                    RainfallMultiData = await _dataService.GetRainfallMultiDataAsync(SelectedHabitRainfallStation);
+                }
+
+                _ = UpdateHabitShiftChartAsync();
             }
             catch { }
-        }  
+        }
 
         [RelayCommand]
         private async Task ClearTableAsync(string dataType)
@@ -429,6 +506,7 @@ namespace GeoVis.ViewModels
                                          "危险操作确认", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result == MessageBoxResult.Yes)
             {
+                // 【重点修复：防止清空报错】
                 string tableName = dataType switch
                 {
                     "OD" => "od_data",
@@ -436,6 +514,7 @@ namespace GeoVis.ViewModels
                     "Temperature" => "temperature_data",
                     "Mobility" => "mobility_data",
                     "Population" => "pop_data",
+                    "Habit" => "habit_data",  // <---- 必须加上这一行
                     _ => "temp_data"
                 };
 
@@ -447,6 +526,7 @@ namespace GeoVis.ViewModels
                 if (dataType == "OD") { NetworkMetricsData?.Clear(); }
                 if (dataType == "Mobility") { MobilityMetricsData?.Clear(); }
                 if (dataType == "Temperature") { AvailableTempStations = new(); TemperatureMultiData?.Clear(); }
+                if (dataType == "Habit") { HabitChartData = null; } // 顺手清掉画布
 
                 OnPropertyChanged(nameof(NetworkMetricsData));
             }
@@ -499,6 +579,32 @@ namespace GeoVis.ViewModels
             TemperatureMultiData = await _dataService.GetTemperatureMultiDataAsync(station);
             // 巧妙复用：触发 NetworkMetricsData 通知，即可驱动 MainWindow.xaml.cs 重新绘制整个图表
             OnPropertyChanged(nameof(NetworkMetricsData));
+        }
+
+        // [Method: 触发 Habit 模块全局查询的统一路口]
+        private async Task UpdateHabitShiftChartAsync()
+        {
+            if (SelectedHabitChartMode == "逐时占比 (单日全天堆叠图)" && HabitSelectedSingleDate == 0) return;
+
+            var multiDates = HabitReferenceDates.Where(x => x.IsSelected).Select(x => x.DateValue).ToList();
+            List<DataQueryService.HabitShiftShare> chartData = new();
+
+            if (SelectedHabitChartMode == "逐时占比 (单日全天堆叠图)")
+                chartData = await _dataService.GetHabitHourlyShareAsync(HabitSelectedSingleDate, IncludeMissingShift);
+            else if (SelectedHabitChartMode == "多日时段趋势 (折线图)")
+                chartData = await _dataService.GetHabitPeriodShareAsync(IncludeMissingShift, SelectedHabitPeriod, multiDates);
+            else if (SelectedHabitChartMode == "特定小时横向对比 (分组柱状)")
+                chartData = await _dataService.GetHabitHourAcrossDaysAsync(IncludeMissingShift, SelectedHabitHour, multiDates);
+            else if (SelectedHabitChartMode == "多日时段横向对比 (堆叠柱状)") // 【新模式的数据获取：复用时段逻辑】
+                chartData = await _dataService.GetHabitPeriodShareAsync(IncludeMissingShift, SelectedHabitPeriod, multiDates);
+
+            // 【关键修复】：如果降水字典为空，主动再拉取一次，防止初次打开软件时无数据
+            if (RainfallMultiData == null && !string.IsNullOrEmpty(SelectedHabitRainfallStation))
+            {
+                RainfallMultiData = await _dataService.GetRainfallMultiDataAsync(SelectedHabitRainfallStation);
+            }
+
+            HabitChartData = chartData; // 触发 UI 重绘
         }
     }
 

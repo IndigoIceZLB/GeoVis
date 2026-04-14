@@ -276,6 +276,96 @@
                             </StackPanel>
                         </Expander>
 
+                        <!-- 模块 3：出行习惯偏移分析 (默认 IsExpanded="True" 展开) -->
+                        <Expander Header="3. 出行习惯偏移分析" IsExpanded="True" Foreground="#E65100" FontWeight="Bold" Margin="0,10,0,0">
+                            <StackPanel>
+                                <TextBlock Text="图表渲染与过滤控制" FontWeight="Bold" Foreground="#E65100" Margin="0,0,0,10"/>
+                                <CheckBox Content="包含 [消失/未出行] 人群" IsChecked="{Binding IncludeMissingShift}" Foreground="#455A64" FontWeight="Bold" Margin="0,0,0,10"/>
+                                <!-- [Control: 分析模式选择] -->
+                                <TextBlock Text="可视化模式:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                <ComboBox ItemsSource="{Binding HabitChartModes}" SelectedItem="{Binding SelectedHabitChartMode}" Background="White" Margin="0,0,0,10"/>
+
+                                <!-- [Control: 堆叠图专属 - 单选日期] -->
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <!-- 【修复】：字符串严格匹配 -->
+                                                <DataTrigger Binding="{Binding SelectedHabitChartMode}" Value="逐时占比 (单日全天堆叠图)">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <TextBlock Text="选择单日数据:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                    <ComboBox ItemsSource="{Binding HabitAvailableDates}" SelectedItem="{Binding HabitSelectedSingleDate}" Background="White" Margin="0,0,0,10"/>
+                                </StackPanel>
+
+                                <!-- [Control: 横向跨日专属 - 多日期选择列表] -->
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SelectedHabitChartMode}" Value="逐时占比 (单日全天堆叠图)">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <TextBlock Text="选择参与跨日对比的日期:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                    <CheckBox Content="✅ 一键全选日期" IsChecked="{Binding IsAllHabitDatesSelected}" Foreground="#388E3C" FontWeight="Bold" Margin="0,0,0,5"/>
+                                    <ListBox ItemsSource="{Binding HabitReferenceDates}" Height="120" Background="#FFF3E0" BorderBrush="#FFCC80" Margin="0,0,0,10">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <CheckBox Content="{Binding DisplayDate}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+
+                                <!-- [Control: 多日折线/堆叠图专属 - 时段选择] -->
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SelectedHabitChartMode}" Value="多日时段趋势 (折线图)">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding SelectedHabitChartMode}" Value="多日时段横向对比 (堆叠柱状)">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <TextBlock Text="选择分析目标时段:" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                    <ComboBox ItemsSource="{Binding AvailableHabitPeriods}" SelectedItem="{Binding SelectedHabitPeriod}" Background="White" Margin="0,0,0,10"/>
+                                </StackPanel>
+
+                                <!-- [Control: 特定小时专属 - 滑块] -->
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SelectedHabitChartMode}" Value="特定小时横向对比 (分组柱状)">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <TextBlock Text="{Binding SelectedHabitHour, StringFormat='选择分析特定小时: {0:D2}:00'}" Foreground="#546E7A" Margin="0,0,0,5"/>
+                                    <Slider Minimum="0" Maximum="23" Value="{Binding SelectedHabitHour}" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,0,0,10"/>
+                                </StackPanel>
+
+                                <TextBlock Text="全宽降水对比控制:" Foreground="#546E7A" Margin="0,10,0,5"/>
+                                <CheckBox Content="开启底部横向降水走势" IsChecked="{Binding ShowHabitRainfall}" Foreground="#1976D2" FontWeight="Bold" Margin="0,0,0,5"/>
+                                <ComboBox ItemsSource="{Binding AvailableStations}" SelectedItem="{Binding SelectedHabitRainfallStation}" Background="White" IsEnabled="{Binding ShowHabitRainfall}"/>
+                            </StackPanel>
+                        </Expander>
+
                     </StackPanel>
                 </ScrollViewer>
 
@@ -324,6 +414,46 @@
             <TabItem Header="🗺️ 空间底图呈现" FontSize="14">
                 <!-- 纯净的 WebView2，ECharts 会在其内部 DOM 渲染，绝不会发生遮挡问题！ -->
                 <wv2:WebView2 x:Name="MapWebView" />
+            </TabItem>
+
+            <!-- 2. 在右侧的 TabControl 内，追加第三个 TabItem -->
+            <TabItem Header="📊 出行习惯偏移分析" FontSize="14">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <!-- 上面占 2 份，下面占 1 份 -->
+                        <RowDefinition Height="2*"/>
+                        <!-- 利用 Splitter 支持用户手动拉伸高度 -->
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="1*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" BorderBrush="#CFD8DC" BorderThickness="1">
+                        <Grid>
+                            <!-- 挂载 MouseMove 事件 -->
+                            <ScottPlot:WpfPlot x:Name="HabitMainChart" MouseMove="HabitMainChart_MouseMove" MouseLeave="HabitMainChart_MouseLeave"/>
+
+                            <!-- 【新增】：纯 WPF 数据探针悬浮面板，位于左上角 -->
+                            <Border x:Name="HabitTooltipBorder" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" 
+                        Background="#F5FFFFFF" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="4" 
+                        Margin="60,20,0,0" Padding="10" IsHitTestVisible="False">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="5" ShadowDepth="2" Opacity="0.2"/>
+                                </Border.Effect>
+                                <TextBlock x:Name="HabitTooltipText" Foreground="#37474F" FontSize="12" LineHeight="20"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#ECEFF1" Margin="0,5"/>
+
+                    <Border Grid.Row="2" Background="#FDFDFD" BorderBrush="#B3E5FC" BorderThickness="1" 
+                Visibility="{Binding ShowHabitRainfall, Converter={StaticResource BoolToVis}}">
+                        <Grid>
+                            <TextBlock Text="🌧️ 多日连续降水走势" FontSize="13" FontWeight="Bold" Foreground="#4FC1E9" Margin="10,5,0,0" Panel.ZIndex="1"/>
+                            <ScottPlot:WpfPlot x:Name="HabitRainfallChart"/>
+                        </Grid>
+                    </Border>
+                </Grid>
             </TabItem>
         </TabControl>
     </Grid>
