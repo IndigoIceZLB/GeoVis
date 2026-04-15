@@ -1,0 +1,41 @@
+﻿<!-- ====== 【新增：Views/DualMapWindow.xaml】 ====== -->
+<Window x:Class="GeoVis.Views.DualMapWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        xmlns:vm="clr-namespace:GeoVis.ViewModels"
+        Title="暴雨出行响应群体 - 空间对比镜像网络 (Dual Sync)" Height="720" Width="1280"
+        WindowStartupLocation="CenterScreen"
+        Background="#ECEFF1"
+        FontFamily="Microsoft YaHei">
+    <Window.DataContext>
+        <vm:DualMapViewModel />
+    </Window.DataContext>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <!-- 严格遵守架构：不产生空域问题的独立控制行 -->
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- 顶部控制台 -->
+        <Border Grid.Row="0" Background="#FFFFFF" BorderBrush="#CFD8DC" BorderThickness="0,0,0,1" Padding="15,10">
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="📁 加载底层 GeoJSON" Command="{Binding LoadGeoJsonCommand}" Padding="15,5" Background="#E3F2FD" BorderBrush="#90CAF9" Foreground="#1565C0" FontWeight="Bold" Margin="0,0,20,0"/>
+
+                    <TextBlock Text="可视化对比维度:" VerticalAlignment="Center" FontWeight="Bold" Foreground="#546E7A" Margin="0,0,10,0"/>
+                    <ComboBox ItemsSource="{Binding Dimensions}" SelectedItem="{Binding SelectedDimension}" Width="160" VerticalAlignment="Center"/>
+
+                    <CheckBox Content="开启右侧对比窗口 (Inactive)" IsChecked="{Binding IsRightMapVisible}" VerticalAlignment="Center" FontWeight="Bold" Foreground="#E65100" Margin="30,0,0,0"/>
+                </StackPanel>
+
+                <TextBlock Text="{Binding StatusMessage}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#9E9E9E" FontSize="12"/>
+            </Grid>
+        </Border>
+
+        <!-- WebView2 承载区 -->
+        <wv2:WebView2 x:Name="DualWebView" Grid.Row="1" />
+    </Grid>
+</Window>

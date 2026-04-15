@@ -1,0 +1,184 @@
+﻿<!-- ====== 【新增：dual_map_template.html】 ====== -->
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Dual Map Sync</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body {
+            padding: 0;
+            margin: 0;
+            background-color: #ECEFF1;
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+        }
+
+        .map-container {
+            position: relative;
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        #leftContainer {
+            width: 50%;
+            border-right: 2px solid #37474F;
+            box-sizing: border-box;
+        }
+
+        #rightContainer {
+            width: 50%;
+        }
+
+        .map-wrapper {
+            width: 100%;
+            height: 100%;
+        }
+
+        .map-title {
+            position: absolute;
+            top: 15px;
+            left: 50px;
+            z-index: 1000;
+            background: rgba(255,255,255,0.9);
+            padding: 5px 15px;
+            border-radius: 4px;
+            font-family: 'Microsoft YaHei', sans-serif;
+            font-weight: bold;
+            color: #37474F;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            pointer-events: none;
+        }
+
+        .leaflet-control-attribution {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="leftContainer" class="map-container">
+        <div class="map-title">🔥 积极出行人群 (Active)</div>
+        <div id="mapLeft" class="map-wrapper"></div>
+    </div>
+    <div id="rightContainer" class="map-container">
+        <div class="map-title">❄️ 消极/未出行人群 (Inactive)</div>
+        <div id="mapRight" class="map-wrapper"></div>
+    </div>
+
+    <script>
+        // GCJ-02 转换核心（继承自主框架）
+        function outOfChina(lng, lat) { return (lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271); }
+        function transformLat(x, y) { var ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x)); ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0; ret += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0; ret += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0; return ret; }
+        function transformLng(x, y) { var ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x)); ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0; ret += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0; ret += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0; return ret; }
+        function wgs84togcj02(lng, lat) { if (outOfChina(lng, lat)) return [lng, lat]; var dlat = transformLat(lng - 105.0, lat - 35.0); var dlng = transformLng(lng - 105.0, lat - 35.0); var a = 6378245.0; var ee = 0.00669342162296594323; var radlat = lat / 180.0 * Math.PI; var magic = Math.sin(radlat); magic = 1 - ee * magic * magic; var sqrtmagic = Math.sqrt(magic); dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * Math.PI); dlng = (dlng * 180.0) / (a / sqrtmagic * Math.cos(radlat) * Math.PI); return [lng + dlng, lat + dlat]; }
+
+        var mapLeft = L.map('mapLeft', { zoomControl: false }).setView([23.1291, 113.2644], 11);
+        var mapRight = L.map('mapRight', { zoomControl: false }).setView([23.1291, 113.2644], 11);
+        L.control.zoom({ position: 'topright' }).addTo(mapLeft);
+
+        // 使用高德底图（科研黑灰风或标准街区），强制开启火星坐标纠偏
+        var url = 'http://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}';
+        L.tileLayer(url, { subdomains: ["1", "2", "3", "4"], maxZoom: 19 }).addTo(mapLeft);
+        L.tileLayer(url, { subdomains: ["1", "2", "3", "4"], maxZoom: 19 }).addTo(mapRight);
+
+        // 防死锁联动系统 (Anti-Deadlock Sync)
+        var isSyncingLeft = false, isSyncingRight = false;
+        mapLeft.on('move', function () { if (!isSyncingLeft) { isSyncingRight = true; mapRight.setView(mapLeft.getCenter(), mapLeft.getZoom(), { animate: false }); } isSyncingLeft = false; });
+        mapRight.on('move', function () { if (!isSyncingRight) { isSyncingLeft = true; mapLeft.setView(mapRight.getCenter(), mapRight.getZoom(), { animate: false }); } isSyncingRight = false; });
+
+        // 色带系统 (绝对值)
+        function getHomeColor(d) { return d > 500 ? '#b30000' : d > 200 ? '#e34a33' : d > 100 ? '#fc8d59' : d > 50 ? '#fdcc8a' : '#fef0d9'; }
+        function getWorkColor(d) { return d > 500 ? '#08519c' : d > 200 ? '#3182bd' : d > 100 ? '#6baed6' : d > 50 ? '#bdd7e7' : '#eff3ff'; }
+
+        // 【新增】：住职比发散色带 (Divergent Color Scale)
+        // Ratio > 1 表示居住主导 (暖色)，Ratio < 1 表示职业主导 (冷色)，0.8~1.2 之间属于住职平衡网格 (浅色)
+        function getRatioColor(r) {
+            if (r > 3.0) return '#d73027';      // 极端居住主导 (深红)
+            if (r > 1.5) return '#fc8d59';      // 居住主导 (橙色)
+            if (r > 1.2) return '#fee090';      // 偏居住
+            if (r >= 0.8) return '#ffffbf';     // 住职高度平衡 (浅黄)
+            if (r >= 0.5) return '#e0f3f8';     // 偏工作
+            if (r >= 0.25) return '#91bfdb';    // 职业主导 (浅蓝)
+            return '#4575b4';                   // 极端职业主导 (深蓝)
+        }
+
+        var layerLeft, layerRight;
+
+        function renderDualMaps(payload) {
+            if (layerLeft) mapLeft.removeLayer(layerLeft);
+            if (layerRight) mapRight.removeLayer(layerRight);
+
+            var dim = payload.dimension; // "Home", "Work", or "Ratio"
+            var isRatio = dim === "Ratio";
+
+            var baseStyle = function (feature, dataDict) {
+                var cid = feature.properties.cid;
+                var val = dataDict[cid];
+                if (val === undefined || val === null) return { fillColor: "transparent", weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: 0.8 };
+
+                // 如果是 Ratio 模式，val 是个对象 { ratio: x, home: y, work: z }，否则是数字
+                var color = isRatio ? getRatioColor(val.ratio) : (dim === "Home" ? getHomeColor(val) : getWorkColor(val));
+                return { fillColor: color, weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: 0.8 };
+            };
+
+            var onEach = function (feature, layer, dataDict) {
+                var cid = feature.properties.cid;
+                var val = dataDict[cid];
+                if (!val) return;
+
+                var tooltipHtml = `<div style="font-family:Arial; font-size:13px;"><b>网格 ID:</b> ${cid}<br/>`;
+
+                if (isRatio) {
+                    var r = val.ratio.toFixed(2);
+                    var funcType = r > 1.2 ? "<span style='color:#d73027;font-weight:bold'>居住主导型</span>"
+                        : (r < 0.8 ? "<span style='color:#4575b4;font-weight:bold'>职业主导型</span>"
+                            : "<span style='color:#66bd63;font-weight:bold'>住职平衡型</span>");
+
+                    tooltipHtml += `● 居住人群: ${val.home}<br/>● 工作人群: ${val.work}<br/>`;
+                    tooltipHtml += `● <b>住职比: ${r}</b> (${funcType})</div>`;
+                } else {
+                    tooltipHtml += `● ${dim === "Home" ? '居住' : '工作'}人数: <b>${val}</b></div>`;
+                }
+                layer.bindTooltip(tooltipHtml);
+            };
+
+            var cToL = function (coords) {
+                var shifted = wgs84togcj02(coords[0], coords[1]);
+                return new L.LatLng(shifted[1], shifted[0]);
+            };
+
+            layerLeft = L.geoJSON(payload.geoJson, {
+                coordsToLatLng: cToL,
+                style: function (f) { return baseStyle(f, payload.activeData); },
+                onEachFeature: function (f, l) { onEach(f, l, payload.activeData); }
+            }).addTo(mapLeft);
+
+            layerRight = L.geoJSON(payload.geoJson, {
+                coordsToLatLng: cToL,
+                style: function (f) { return baseStyle(f, payload.inactiveData); },
+                onEachFeature: function (f, l) { onEach(f, l, payload.inactiveData); }
+            }).addTo(mapRight);
+        }
+
+        window.chrome.webview.addEventListener('message', event => {
+            var msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+            if (msg.type === "render") {
+                renderDualMaps(msg);
+            } else if (msg.type === "toggle_right") {
+                // UI 布局联动，隐藏右侧，左侧满屏
+                var leftC = document.getElementById('leftContainer');
+                var rightC = document.getElementById('rightContainer');
+                if (msg.show) {
+                    leftC.style.width = "50%"; leftC.style.borderRight = "2px solid #37474F"; rightC.style.display = "block";
+                } else {
+                    leftC.style.width = "100%"; leftC.style.borderRight = "none"; rightC.style.display = "none";
+                }
+                setTimeout(function(){ mapLeft.invalidateSize(); mapRight.invalidateSize(); }, 300);
+            }
+        });
+    </script>
+</body>
+</html>

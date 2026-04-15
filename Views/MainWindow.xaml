@@ -96,6 +96,24 @@
                                     <Button Content="入库: 月度常住人口表" Command="{Binding ImportMultiDataCommand}" CommandParameter="Population" Style="{StaticResource AcademicButtonStyle}"/>
                                     <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="Population" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828" BorderBrush="#FFCDD2" Style="{StaticResource AcademicButtonStyle}"/>
                                 </Grid>
+
+                                <!-- 积极消极JHR数据行 -->
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="入库: 积极出行空间分布" Command="{Binding ImportMultiDataCommand}" CommandParameter="ActiveSpatial" Background="#FFF3E0" Foreground="#E65100" FontWeight="Bold"/>
+                                    <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="ActiveSpatial" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828"/>
+                                </Grid>
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="入库: 消极出行空间分布" Command="{Binding ImportMultiDataCommand}" CommandParameter="InactiveSpatial" Background="#E3F2FD" Foreground="#1565C0" FontWeight="Bold"/>
+                                    <Button Grid.Column="1" Content="清空" Command="{Binding ClearTableCommand}" CommandParameter="InactiveSpatial" Margin="5,0,0,0" Background="#FFEBEE" Foreground="#C62828"/>
+                                </Grid>
                             </StackPanel>
                         </Expander>
 
@@ -277,6 +295,8 @@
                         </Expander>
 
                         <!-- 模块 3：出行习惯偏移分析 (默认 IsExpanded="True" 展开) -->
+                        <Button Content="🚀 启动双画布空间比对视窗" Command="{Binding OpenDualMapWindowCommand}" 
+        Background="#E8F5E9" Foreground="#2E7D32" FontWeight="Bold" Margin="0,0,0,15" Padding="5" BorderBrush="#81C784"/>
                         <Expander Header="3. 出行习惯偏移分析" IsExpanded="True" Foreground="#E65100" FontWeight="Bold" Margin="0,10,0,0">
                             <StackPanel>
                                 <TextBlock Text="图表渲染与过滤控制" FontWeight="Bold" Foreground="#E65100" Margin="0,0,0,10"/>

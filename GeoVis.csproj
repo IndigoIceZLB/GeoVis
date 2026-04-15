@@ -39,4 +39,10 @@
     </Resource>
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Assets\web\dual_map_template.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

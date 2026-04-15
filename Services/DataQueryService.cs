@@ -677,6 +677,96 @@ namespace GeoVis.Services
             });
         }
 
+        // ====== 【新增：DataQueryService.cs 中的双图查询逻辑】 ======
+        /// <summary>
+        /// 针对 active/inactive 暴雨习惯群体的空间分布极速查询
+        /// ptype: 1=Home, 2=Work
+        /// </summary>
+        public async Task<Dictionary<string, long>> GetHabitSpatialDataAsync(string tableName, int ptype)
+        {
+            return await Task.Run(() =>
+            {
+                var dict = new Dictionary<string, long>();
+                try
+                {
+                    using var conn = DuckDbFactory.GetConnection();
+                    // 严格遵守 Python 逻辑：过滤 ptype 并剔除 ucnt < 5 的噪点
+                    string sql = $@"
+                        SELECT CAST(cid AS VARCHAR) AS Id, CAST(SUM(ucnt) AS BIGINT) AS Val
+                        FROM {tableName}
+                        WHERE ptype = {ptype} AND ucnt >= 5
+                        GROUP BY cid;
+                    ";
+                    var list = conn.Query(sql);
+                    foreach (var row in list)
+                    {
+                        dict[Convert.ToString(row.Id)] = Convert.ToInt64(row.Val);
+                    }
+                }
+                catch { /* 表不存在时静默返回空字典 */ }
+                return dict;
+            });
+        }
+
+        // ====== 【新增：DataQueryService.cs 追加住职比专有实体与方法】 ======
+
+        public class HabitRatioData
+        {
+            public double ratio { get; set; }
+            public long home { get; set; }
+            public long work { get; set; }
+        }
+
+        /// <summary>
+        /// 极速透视计算网格的住职比 (Home/Work Ratio)
+        /// </summary>
+        public async Task<Dictionary<string, HabitRatioData>> GetHabitSpatialRatioAsync(string tableName)
+        {
+            return await Task.Run(() =>
+            {
+                var dict = new Dictionary<string, HabitRatioData>();
+                try
+                {
+                    using var conn = DuckDbFactory.GetConnection();
+
+                    // 架构师精雕 SQL：利用 CTE 完成一元到二元数据的 Pivot 透视
+                    // 严格过滤条件：仅计算 ucnt >= 5 的有效数据，并在外层严格剔除 Home 或 Work 为 0 的网格（零值不参与）
+                    string sql = $@"
+                        WITH pivot_data AS (
+                            SELECT 
+                                cid,
+                                SUM(CASE WHEN ptype = 1 THEN ucnt ELSE 0 END) AS home_cnt,
+                                SUM(CASE WHEN ptype = 2 THEN ucnt ELSE 0 END) AS work_cnt
+                            FROM {tableName}
+                            WHERE ucnt >= 5
+                            GROUP BY cid
+                        )
+                        SELECT 
+                            CAST(cid AS VARCHAR) AS Id, 
+                            CAST(home_cnt AS BIGINT) AS home, 
+                            CAST(work_cnt AS BIGINT) AS work, 
+                            CAST((home_cnt * 1.0 / work_cnt) AS DOUBLE) AS ratio
+                        FROM pivot_data
+                        WHERE home_cnt > 0 AND work_cnt > 0;
+                    ";
+
+                    var list = conn.Query(sql);
+                    foreach (var row in list)
+                    {
+                        dict[Convert.ToString(row.Id)] = new HabitRatioData
+                        {
+                            home = Convert.ToInt64(row.home),
+                            work = Convert.ToInt64(row.work),
+                            ratio = Convert.ToDouble(row.ratio)
+                        };
+                    }
+                }
+                catch { /* 表不存在静默跳过 */ }
+                return dict;
+            });
+        }
+        // =====================================================================
+
         /// <summary>
         /// 【新增】：专门从 habit_data 表独立提取所有可用日期，彻底解耦
         /// </summary>

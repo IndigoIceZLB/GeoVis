@@ -306,6 +306,8 @@ namespace GeoVis.ViewModels
                         "Mobility" => "mobility_data",
                         "Population" => "pop_data",
                         "Habit" => "habit_data",  // <---- 必须加上这一行
+                        "ActiveSpatial" => "active_spatial_data",    // <--- 新增
+                        "InactiveSpatial" => "inactive_spatial_data",// <--- 新增
                         _ => "temp_data"
                     };
 
@@ -515,6 +517,8 @@ namespace GeoVis.ViewModels
                     "Mobility" => "mobility_data",
                     "Population" => "pop_data",
                     "Habit" => "habit_data",  // <---- 必须加上这一行
+                    "ActiveSpatial" => "active_spatial_data",    // <--- 新增
+                    "InactiveSpatial" => "inactive_spatial_data",// <--- 新增
                     _ => "temp_data"
                 };
 
@@ -605,6 +609,14 @@ namespace GeoVis.ViewModels
             }
 
             HabitChartData = chartData; // 触发 UI 重绘
+        }
+
+        // 在类的末尾新增一个命令，用于打开双图窗口：
+        [RelayCommand]
+        private void OpenDualMapWindow()
+        {
+            var win = new GeoVis.Views.DualMapWindow();
+            win.Show();
         }
     }
 
