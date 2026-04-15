@@ -767,6 +767,37 @@ namespace GeoVis.Services
         }
         // =====================================================================
 
+        // ====== 【新增：DataQueryService.cs 追加目的地到达量查询】 ======
+        /// <summary>
+        /// 极速查询积极/消极人群的目的地到达流量 (arrive.csv)
+        /// 基于 Python 脚本提取字段：dest_grid, arrive_trip_cnt
+        /// </summary>
+        public async Task<Dictionary<string, long>> GetArriveSpatialDataAsync(string tableName)
+        {
+            return await Task.Run(() =>
+            {
+                var dict = new Dictionary<string, long>();
+                try
+                {
+                    using var conn = DuckDbFactory.GetConnection();
+                    // 严格映射 Python 中的字段名，按目的地聚合
+                    string sql = $@"
+                        SELECT CAST(dest_grid AS VARCHAR) AS Id, CAST(SUM(arrive_trip_cnt) AS BIGINT) AS Val
+                        FROM {tableName}
+                        GROUP BY dest_grid;
+                    ";
+                    var list = conn.Query(sql);
+                    foreach (var row in list)
+                    {
+                        dict[Convert.ToString(row.Id)] = Convert.ToInt64(row.Val);
+                    }
+                }
+                catch { /* 表未导入时静默跳过，避免前端崩溃 */ }
+                return dict;
+            });
+        }
+        // =====================================================================
+
         /// <summary>
         /// 【新增】：专门从 habit_data 表独立提取所有可用日期，彻底解耦
         /// </summary>

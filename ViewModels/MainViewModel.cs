@@ -308,6 +308,8 @@ namespace GeoVis.ViewModels
                         "Habit" => "habit_data",  // <---- 必须加上这一行
                         "ActiveSpatial" => "active_spatial_data",    // <--- 新增
                         "InactiveSpatial" => "inactive_spatial_data",// <--- 新增
+                        "ActiveArrive" => "active_arrive_data",
+                        "InactiveArrive" => "inactive_arrive_data",
                         _ => "temp_data"
                     };
 
@@ -519,6 +521,8 @@ namespace GeoVis.ViewModels
                     "Habit" => "habit_data",  // <---- 必须加上这一行
                     "ActiveSpatial" => "active_spatial_data",    // <--- 新增
                     "InactiveSpatial" => "inactive_spatial_data",// <--- 新增
+                    "ActiveArrive" => "active_arrive_data",
+                    "InactiveArrive" => "inactive_arrive_data",
                     _ => "temp_data"
                 };
 

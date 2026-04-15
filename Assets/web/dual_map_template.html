@@ -93,6 +93,12 @@
         function getHomeColor(d) { return d > 500 ? '#b30000' : d > 200 ? '#e34a33' : d > 100 ? '#fc8d59' : d > 50 ? '#fdcc8a' : '#fef0d9'; }
         function getWorkColor(d) { return d > 500 ? '#08519c' : d > 200 ? '#3182bd' : d > 100 ? '#6baed6' : d > 50 ? '#bdd7e7' : '#eff3ff'; }
 
+        // 1. 全局增加网格透明度变量
+        var currentGridOpacity = 0.8;
+
+        // 2. 补充 Arrive 维度的紫红色带 (对应 Python 的 PuRd)
+        function getArriveColor(d) { return d > 500 ? '#ce1256' : d > 200 ? '#df65b0' : d > 100 ? '#d4b9da' : d > 50 ? '#e7e1ef' : '#f1eef6'; }
+
         // 【新增】：住职比发散色带 (Divergent Color Scale)
         // Ratio > 1 表示居住主导 (暖色)，Ratio < 1 表示职业主导 (冷色)，0.8~1.2 之间属于住职平衡网格 (浅色)
         function getRatioColor(r) {
@@ -104,6 +110,47 @@
             if (r >= 0.25) return '#91bfdb';    // 职业主导 (浅蓝)
             return '#4575b4';                   // 极端职业主导 (深蓝)
         }
+        // Home (居住): OrRd (红橙系)
+        function getHomeColor(d) {
+            if (d > 15000) return '#4d0000'; // 极值黑红
+            if (d > 10000) return '#7f0000'; // 1万+
+            if (d > 5000) return '#b30000'; // 5千+
+            if (d > 2000) return '#d7301f'; // 2千+
+            if (d > 1000) return '#ef6548'; // 1千+
+            if (d > 500) return '#fc8d59';
+            if (d > 200) return '#fdbb84';
+            if (d > 100) return '#fdd49e';
+            if (d > 50) return '#fee8c8';
+            return '#fff7ec';
+        }
+
+        // Work (工作): Blues (冷蓝系)
+        function getWorkColor(d) {
+            if (d > 15000) return '#041a3a'; // 极值深邃蓝
+            if (d > 10000) return '#08306b'; // 1万+
+            if (d > 5000) return '#08519c'; // 5千+
+            if (d > 2000) return '#2171b5'; // 2千+
+            if (d > 1000) return '#4292c6'; // 1千+
+            if (d > 500) return '#6baed6';
+            if (d > 200) return '#9ecae1';
+            if (d > 100) return '#c6dbef';
+            if (d > 50) return '#deebf7';
+            return '#f7fbff';
+        }
+
+        // Arrive (到达): PuRd (紫红系) - 完美拉开 16000 和 2000 的差距！
+        function getArriveColor(d) {
+            if (d > 15000) return '#490012'; // 极值黑紫
+            if (d > 10000) return '#67001f'; // 1万+
+            if (d > 5000) return '#980043'; // 5千+
+            if (d > 2000) return '#ce1256'; // 2千+ (之前版本所有的最高色)
+            if (d > 1000) return '#e7298a'; // 1千+
+            if (d > 500) return '#df65b0';
+            if (d > 200) return '#c994c7';
+            if (d > 100) return '#d4b9da';
+            if (d > 50) return '#e7e1ef';
+            return '#f7f4f9';
+        }
 
         var layerLeft, layerRight;
 
@@ -111,17 +158,21 @@
             if (layerLeft) mapLeft.removeLayer(layerLeft);
             if (layerRight) mapRight.removeLayer(layerRight);
 
-            var dim = payload.dimension; // "Home", "Work", or "Ratio"
+            var dim = payload.dimension; // "Home", "Work", "Ratio", "Arrive"
+
             var isRatio = dim === "Ratio";
 
             var baseStyle = function (feature, dataDict) {
                 var cid = feature.properties.cid;
                 var val = dataDict[cid];
-                if (val === undefined || val === null) return { fillColor: "transparent", weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: 0.8 };
+                if (val === undefined || val === null) return { fillColor: "transparent", weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: currentGridOpacity }; // 使用变量
 
-                // 如果是 Ratio 模式，val 是个对象 { ratio: x, home: y, work: z }，否则是数字
-                var color = isRatio ? getRatioColor(val.ratio) : (dim === "Home" ? getHomeColor(val) : getWorkColor(val));
-                return { fillColor: color, weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: 0.8 };
+                var color;
+                if (isRatio) color = getRatioColor(val.ratio);
+                else if (dim === "Arrive") color = getArriveColor(val);
+                else color = dim === "Home" ? getHomeColor(val) : getWorkColor(val);
+
+                return { fillColor: color, weight: 0.5, opacity: 1, color: '#9A9A9A', fillOpacity: currentGridOpacity };
             };
 
             var onEach = function (feature, layer, dataDict) {
@@ -133,12 +184,10 @@
 
                 if (isRatio) {
                     var r = val.ratio.toFixed(2);
-                    var funcType = r > 1.2 ? "<span style='color:#d73027;font-weight:bold'>居住主导型</span>"
-                        : (r < 0.8 ? "<span style='color:#4575b4;font-weight:bold'>职业主导型</span>"
-                            : "<span style='color:#66bd63;font-weight:bold'>住职平衡型</span>");
-
-                    tooltipHtml += `● 居住人群: ${val.home}<br/>● 工作人群: ${val.work}<br/>`;
-                    tooltipHtml += `● <b>住职比: ${r}</b> (${funcType})</div>`;
+                    var funcType = r > 1.2 ? "<span style='color:#d73027;font-weight:bold'>居住主导型</span>" : (r < 0.8 ? "<span style='color:#4575b4;font-weight:bold'>职业主导型</span>" : "<span style='color:#66bd63;font-weight:bold'>住职平衡型</span>");
+                    tooltipHtml += `● 居住人群: ${val.home}<br/>● 工作人群: ${val.work}<br/>● <b>住职比: ${r}</b> (${funcType})</div>`;
+                } else if (dim === "Arrive") {
+                    tooltipHtml += `● 到达总流量: <b style="color:#ce1256">${val}</b></div>`; // Arrive 专属文本
                 } else {
                     tooltipHtml += `● ${dim === "Home" ? '居住' : '工作'}人数: <b>${val}</b></div>`;
                 }
@@ -177,6 +226,10 @@
                     leftC.style.width = "100%"; leftC.style.borderRight = "none"; rightC.style.display = "none";
                 }
                 setTimeout(function(){ mapLeft.invalidateSize(); mapRight.invalidateSize(); }, 300);
+            } else if (msg.type === "change_opacity") {
+                currentGridOpacity = msg.value;
+                if (layerLeft) layerLeft.setStyle({ fillOpacity: currentGridOpacity });
+                if (layerRight) layerRight.setStyle({ fillOpacity: currentGridOpacity });
             }
         });
     </script>

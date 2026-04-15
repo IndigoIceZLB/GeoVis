@@ -26,11 +26,11 @@ namespace GeoVis.ViewModels
             set { if (SetProperty(ref _selectedDimension, value)) _ = RenderMapsAsync(); }
         }
 
-        // 1. 在属性定义区，追加一个“住职比”维度
-        [ObservableProperty] private System.Collections.ObjectModel.ObservableCollection<string> _dimensions = new() { "Home (居住地)", "Work (工作地)", "住职比 (Home/Work Ratio)" };
-
         private string _baseGeoJson = null;
         public event Action<string> OnGeoJsonReadyToSend;
+
+        // 1. 维度追加 "Arrive (到达目的地)"
+        [ObservableProperty] private System.Collections.ObjectModel.ObservableCollection<string> _dimensions = new() { "Home (居住地)", "Work (工作地)", "住职比 (Home/Work Ratio)", "Arrive (到达目的地)" };
 
         public DualMapViewModel()
         {
@@ -55,12 +55,12 @@ namespace GeoVis.ViewModels
             }
         }
 
+        // 3. 修改 RenderMapsAsync 的数据路由分发：
         private async Task RenderMapsAsync()
         {
             if (string.IsNullOrEmpty(_baseGeoJson)) return;
-
             StatusMessage = "DuckDB 高并发计算中...";
-            
+
             object activeData;
             object inactiveData;
             string payloadDimension;
@@ -68,9 +68,17 @@ namespace GeoVis.ViewModels
             if (SelectedDimension.Contains("Ratio"))
             {
                 payloadDimension = "Ratio";
-                // 并发获取住职比复杂对象
                 var taskActive = _dataService.GetHabitSpatialRatioAsync("active_spatial_data");
                 var taskInactive = _dataService.GetHabitSpatialRatioAsync("inactive_spatial_data");
+                await Task.WhenAll(taskActive, taskInactive);
+                activeData = taskActive.Result;
+                inactiveData = taskInactive.Result;
+            }
+            else if (SelectedDimension.Contains("Arrive")) // <--- 【新增 Arrive 分支】
+            {
+                payloadDimension = "Arrive";
+                var taskActive = _dataService.GetArriveSpatialDataAsync("active_arrive_data");
+                var taskInactive = _dataService.GetArriveSpatialDataAsync("inactive_arrive_data");
                 await Task.WhenAll(taskActive, taskInactive);
                 activeData = taskActive.Result;
                 inactiveData = taskInactive.Result;
@@ -79,7 +87,6 @@ namespace GeoVis.ViewModels
             {
                 payloadDimension = SelectedDimension.Contains("Home") ? "Home" : "Work";
                 int ptype = payloadDimension == "Home" ? 1 : 2;
-                // 并发获取单维度绝对值
                 var taskActive = _dataService.GetHabitSpatialDataAsync("active_spatial_data", ptype);
                 var taskInactive = _dataService.GetHabitSpatialDataAsync("inactive_spatial_data", ptype);
                 await Task.WhenAll(taskActive, taskInactive);
@@ -87,8 +94,6 @@ namespace GeoVis.ViewModels
                 inactiveData = taskInactive.Result;
             }
 
-            // 组装 JSON，因为 activeData 是 object（可能是 Dictionary<string, long> 或 Dictionary<string, HabitRatioData>），
-            // System.Text.Json 会利用反射完美将其序列化发送给 JS。
             var payload = new
             {
                 type = "render",
@@ -97,11 +102,26 @@ namespace GeoVis.ViewModels
                 activeData = activeData,
                 inactiveData = inactiveData
             };
-
-            string jsonStr = JsonSerializer.Serialize(payload);
-            OnGeoJsonReadyToSend?.Invoke(jsonStr);
-
+            OnGeoJsonReadyToSend?.Invoke(JsonSerializer.Serialize(payload));
             StatusMessage = $"渲染完成 | 维度: {SelectedDimension}";
         }
+
+
+        // 2. 新增透明度控制属性 (利用 Source Generator 触发机制)
+        private double _gridOpacity = 0.8;
+        public double GridOpacity
+        {
+            get => _gridOpacity;
+            set
+            {
+                if (SetProperty(ref _gridOpacity, value))
+                {
+                    // 零延迟指令：直接推送前端动态修改 CSS，不触发重绘
+                    var payload = new { type = "change_opacity", value = value };
+                    OnGeoJsonReadyToSend?.Invoke(JsonSerializer.Serialize(payload));
+                }
+            }
+        }
+
     }
 }
